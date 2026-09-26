@@ -20,7 +20,7 @@ export const academicYear = (year: string) =>
   `${parseInt(year, 10)}-${parseInt(year, 10) + 1}`;
 export function currentYear() {
   const now = new Date();
-  return now.getFullYear() - (now.getMonth() < 7 ? 1 : 0);
+  return now.getFullYear() - (now.getMonth() < 8 ? 1 : 0);
 }
 export const yearOptions = () =>
   Array.from({ length: 9 }, (_, i) =>

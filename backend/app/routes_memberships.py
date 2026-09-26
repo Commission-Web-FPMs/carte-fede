@@ -20,6 +20,31 @@ def my_memberships():
 # ---------- Helpers (validation/normalisation) ----------
 ALLOWED_PREFIXES = {"A", "F", "E", "EA", "MI", "S"}
 
+def next_available_card_code(annee: int, prefix: str = "A") -> str:
+    """Retourne le premier numéro de carte libre pour une année et un préfixe."""
+    prefix = prefix.strip().upper()
+    if prefix not in ALLOWED_PREFIXES:
+        raise ValueError(f"Préfixe invalide. Autorisés: {', '.join(sorted(ALLOWED_PREFIXES))}")
+
+    existing = Membership.query.filter(
+        Membership.annee == annee,
+        Membership.annee_code.ilike(f"{prefix}-%"),
+    ).all()
+
+    used_numbers = set()
+    for membership in existing:
+        try:
+            card_prefix, number = membership.annee_code.split("-", 1)
+            if card_prefix.upper() == prefix:
+                used_numbers.add(int(number))
+        except (ValueError, AttributeError):
+            continue
+
+    number = 1
+    while number in used_numbers:
+        number += 1
+    return f"{prefix}-{number}"
+
 def normalize_card_code(raw: str) -> str:
     """
     Normalise un code 'PREFIX-NUM':
@@ -85,7 +110,9 @@ def upsert_or_list_year(user_id):
     data = request.json or {}
     try:
         annee_start = parse_year_range_to_start(data.get("annee"))
-        code = normalize_card_code(data.get("annee_code", ""))
+        raw_code = str(data.get("annee_code") or "").strip()
+        prefix = str(data.get("prefix") or "A").strip().upper()
+        code = normalize_card_code(raw_code) if raw_code else next_available_card_code(annee_start, prefix)
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
 
@@ -108,7 +135,7 @@ def upsert_or_list_year(user_id):
         db.session.add(row)
 
     db.session.commit()
-    return jsonify({"ok": True, "id": row.id})
+    return jsonify({"ok": True, "id": row.id, "annee": row.annee, "annee_code": row.annee_code})
 
 
 # ---------- Admin : suppression d’une carte ----------

@@ -39,7 +39,7 @@ export default function UserDetails({
   } | null>(null);
   const [confirmation, setConfirmation] = useState<Confirmation | null>(null);
   const [cardYear, setCardYear] = useState(String(currentYear()));
-  const [cardCode, setCardCode] = useState("A-1");
+  const [cardCode, setCardCode] = useState("");
   const base = `/api/admin/users/${user.id}`;
   const cards = Object.entries(user.cartes ?? {}).sort(
     ([a], [b]) => parseInt(b, 10) - parseInt(a, 10),
@@ -167,26 +167,39 @@ export default function UserDetails({
     event.preventDefault();
     const data = new FormData(event.currentTarget);
     const prefix = String(data.get("prefix"));
-    const num = Number(data.get("num"));
-    if (!PREFIXES.includes(prefix) || !Number.isSafeInteger(num) || num < 1) {
-      setMessage({
-        error: true,
-        text: "Choisissez un préfixe et un numéro entier supérieur ou égal à 1.",
-      });
+    const rawNum = String(data.get("num") ?? "").trim();
+    if (!PREFIXES.includes(prefix)) {
+      setMessage({ error: true, text: "Choisissez un préfixe valide." });
       return;
     }
-    const code = `${prefix}-${num}`;
+
+    let code = "";
+    if (rawNum) {
+      const num = Number(rawNum);
+      if (!Number.isSafeInteger(num) || num < 1) {
+        setMessage({
+          error: true,
+          text: "Le numéro doit être un entier supérieur ou égal à 1.",
+        });
+        return;
+      }
+      code = `${prefix}-${num}`;
+    }
+
     const replacing = !!user.cartes?.[cardYear];
     void mutate(replacing ? "Mise à jour…" : "Ajout…", async () => {
-      await request(`${base}/annees`, "PUT", {
+      const response = await request(`${base}/annees`, "PUT", {
         annee: academicYear(cardYear),
-        annee_code: code,
+        prefix,
+        ...(code ? { annee_code: code } : {}),
       });
-      onChange({ ...user, cartes: { ...user.cartes, [cardYear]: code } });
+      const result = await response.json();
+      const assignedCode = result.annee_code;
+      onChange({ ...user, cartes: { ...user.cartes, [cardYear]: assignedCode } });
       setMode("view");
       setMessage({
         error: false,
-        text: `Carte ${code} ${replacing ? "mise à jour" : "ajoutée"} pour ${academicYear(cardYear)}.`,
+        text: `Carte ${assignedCode} ${replacing ? "mise à jour" : "ajoutée"} pour ${academicYear(cardYear)}.`,
       });
     });
   }
@@ -216,7 +229,7 @@ export default function UserDetails({
     });
   }
 
-  function openCard(year = String(currentYear()), code = "A-1") {
+  function openCard(year = String(currentYear()), code = "") {
     setCardYear(year);
     setCardCode(code);
     changeMode("card");
@@ -394,7 +407,7 @@ export default function UserDetails({
                     <select
                       className="admin-input"
                       name="prefix"
-                      defaultValue={cardCode.split("-")[0]}
+                      defaultValue={cardCode ? cardCode.split("-")[0] : "A"}
                     >
                       {PREFIXES.map((prefix) => (
                         <option key={prefix}>{prefix}</option>
@@ -411,9 +424,12 @@ export default function UserDetails({
                       min={1}
                       step={1}
                       max={Number.MAX_SAFE_INTEGER}
-                      defaultValue={cardCode.split("-")[1]}
-                      required
+                      defaultValue={cardCode ? cardCode.split("-")[1] : ""}
+                      placeholder="Automatique"
                     />
+                    <span className="text-xs text-slate-500">
+                      Laissez vide pour attribuer le premier numéro disponible.
+                    </span>
                   </label>
                 </div>
                 {user.cartes?.[cardYear] && (
