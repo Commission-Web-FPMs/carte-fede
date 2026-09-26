@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { navItems as originalNavItems, type NavItem } from "./NavItems";
 
 type Me = {
@@ -13,6 +13,19 @@ export default function Nav() {
   const [role, setRole] = useState<string>("guest");
   const [me, setMe] = useState<Me | null>(null);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const menuButton = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    const close = () => setIsMenuOpen(false);
+    const escape = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && isMenuOpen) { close(); menuButton.current?.focus(); }
+    };
+    document.addEventListener("keydown", escape);
+    document.addEventListener("astro:before-swap", close);
+    return () => {
+      document.removeEventListener("keydown", escape);
+      document.removeEventListener("astro:before-swap", close);
+    };
+  }, [isMenuOpen]);
 
   useEffect(() => {
     fetch("/api/me", { credentials: "include" })
@@ -65,7 +78,7 @@ export default function Nav() {
     : "Non connecté";
 
   return (
-    <nav className="container mx-auto px-4 pb-4">
+    <nav className="container mx-auto px-3 pb-2 lg:px-4 lg:pb-4">
       <div className="hidden items-center justify-between gap-6 lg:flex">
         <ul className="flex flex-wrap gap-4 text-sm lg:text-base">
           {navItems.map((item: NavItem) => (
@@ -108,18 +121,17 @@ export default function Nav() {
       <div className="lg:hidden">
         <div className="flex items-center justify-between gap-3">
           <div className="min-w-0">
-            <p className="truncate text-xs font-medium uppercase tracking-[0.18em] text-blue-700">
-              Navigation
-            </p>
-            <p className={`truncate text-sm ${me ? "text-slate-700" : "text-slate-500"}`}>{userLabel}</p>
+            <p title={userLabel} className={`truncate text-xs ${me ? "text-slate-700" : "text-slate-500"}`}>{userLabel}</p>
           </div>
 
           <button
             type="button"
             onClick={() => setIsMenuOpen((open) => !open)}
+            ref={menuButton}
+            aria-label={isMenuOpen ? "Fermer le menu" : "Ouvrir le menu"}
             aria-expanded={isMenuOpen}
             aria-controls="mobile-nav-panel"
-            className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-2 text-sm font-semibold text-blue-900 shadow-sm"
+            className="inline-flex min-h-11 shrink-0 items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold text-blue-900 shadow-sm"
           >
             <span>Menu</span>
             <span aria-hidden="true" className="text-lg leading-none">
@@ -131,9 +143,10 @@ export default function Nav() {
         {isMenuOpen ? (
           <div
             id="mobile-nav-panel"
-            className="mt-3 rounded-3xl border border-slate-200 bg-white p-3 shadow-xl shadow-slate-200/70 ring-1 ring-slate-100"
+            className="mt-2 max-h-[calc(100dvh-7rem)] overflow-y-auto overscroll-contain rounded-2xl border border-slate-200 bg-white p-3 shadow-xl shadow-slate-200/70 ring-1 ring-slate-100"
           >
-            <ul className="space-y-2">
+            <p className="mb-3 break-all px-3 text-sm font-normal text-slate-600">{userLabel}</p>
+            <ul className="space-y-1">
               {navItems.map((item: NavItem) => (
                 <li key={item.href}>
                   <a
