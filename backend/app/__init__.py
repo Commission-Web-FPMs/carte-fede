@@ -11,15 +11,15 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 def create_app():
     app = Flask(__name__)
     remember_days = int(os.getenv("REMEMBER_COOKIE_DAYS", "30"))
-    app.config["SQLALCHEMY_DATABASE_URI"] = "postgresql://postgres:postgres@db:5432/membres"
+    app.config["SQLALCHEMY_DATABASE_URI"] = "postgresql+psycopg://postgres:postgres@db:5432/membres"
     app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
     app.config["SECRET_KEY"] = os.getenv("SECRET_KEY", "changeme")
     app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {"pool_pre_ping": True}
     app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
-    app.config["SESSION_COOKIE_SECURE"] = True
+    app.config["SESSION_COOKIE_SECURE"] = True # should be True in prod, False for local testing
     app.config["SESSION_COOKIE_HTTPONLY"] = True
     app.config["REMEMBER_COOKIE_DURATION"] = timedelta(days=remember_days)
-    app.config["REMEMBER_COOKIE_SECURE"] = True
+    app.config["REMEMBER_COOKIE_SECURE"] = True # should be True in prod, False for local testing
     app.config["REMEMBER_COOKIE_HTTPONLY"] = True
     app.config["REMEMBER_COOKIE_SAMESITE"] = "Lax"
     app.config["MAIL_ADDRESS"] = os.getenv("MAIL_ADDRESS", "")
