@@ -42,7 +42,7 @@ const canonicalURL = new URL(Astro.url.pathname, Astro.site)
       content="Bienvenue sur le site de la Fédération des étudiants FPMs ! Aussi appelée la Fédé, elle a comme rôle de représenter les étudiants de la Polytech de Mons dans le contexte académique et folklorique"
     />
     <meta name="author" content="Commission Web FPMs" />
-    <meta name="viewport" content="width=device-width" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content" />
     <meta name="theme-color" content="#1e3a8a" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -107,71 +107,57 @@ const canonicalURL = new URL(Astro.url.pathname, Astro.site)
       <slot />
     </div>
     <Footer />
-    <button
-      id="pwaInstallButton"
-      type="button"
-      class="pwa-install"
-      aria-hidden="true"
-    >
-      <span aria-hidden="true">+</span>
-      Installer l'app
-    </button>
-    <script src="/pwa-register.js" defer></script>
-    <script is:inline>
-      let deferredInstallPrompt = null;
-
-      const installButton = document.getElementById("pwaInstallButton");
-      const isStandalone =
-        window.matchMedia("(display-mode: standalone)").matches ||
-        window.navigator.standalone === true;
-      const isIos =
-        /iphone|ipad|ipod/i.test(window.navigator.userAgent) &&
-        !/android/i.test(window.navigator.userAgent);
-
-      function showInstallButton() {
-        if (!installButton || isStandalone) return;
-        installButton.classList.add("is-visible");
-        installButton.setAttribute("aria-hidden", "false");
+    <aside id="pwaInstallPrompt" class="pwa-install" aria-label="Installation de l’application">
+      <button id="pwaInstallButton" type="button">Installer l’app</button>
+      <button id="pwaDismissButton" type="button">Plus tard</button>
+    </aside>
+    <script is:inline src="/pwa-register.js" defer></script>
+    <script>
+      interface InstallPrompt extends Event {
+        prompt: () => Promise<void>;
+        userChoice: Promise<{ outcome: string }>;
       }
-
-      function hideInstallButton() {
-        if (!installButton) return;
-        installButton.classList.remove("is-visible");
-        installButton.setAttribute("aria-hidden", "true");
+      let deferredInstallPrompt: InstallPrompt | null = null;
+      let dismissed = false;
+      const isStandalone = () => window.matchMedia("(display-mode: standalone)").matches ||
+        ("standalone" in navigator && navigator.standalone === true);
+      const isIos = /iphone|ipad|ipod/i.test(navigator.userAgent) && !/android/i.test(navigator.userAgent);
+      function updateInstallPrompt() {
+        document.getElementById("pwaInstallPrompt")?.classList.toggle("is-visible",
+          !dismissed && !isStandalone() && (!!deferredInstallPrompt || isIos));
       }
-
       window.addEventListener("beforeinstallprompt", (event) => {
         event.preventDefault();
-        deferredInstallPrompt = event;
-        showInstallButton();
+        deferredInstallPrompt = event as InstallPrompt;
+        updateInstallPrompt();
       });
-
       window.addEventListener("appinstalled", () => {
         deferredInstallPrompt = null;
-        hideInstallButton();
+        dismissed = true;
+        updateInstallPrompt();
       });
-
-      if (isIos && !isStandalone) {
-        showInstallButton();
-      }
-
-      installButton?.addEventListener("click", async () => {
+      document.addEventListener("astro:page-load", updateInstallPrompt);
+      updateInstallPrompt();
+      document.addEventListener("click", async (event) => {
+        if (!(event.target instanceof Element)) return;
+        if (event.target.closest("#pwaDismissButton")) {
+          dismissed = true;
+          updateInstallPrompt();
+        }
+        if (!event.target.closest("#pwaInstallButton")) return;
         if (deferredInstallPrompt) {
-          deferredInstallPrompt.prompt();
+          await deferredInstallPrompt.prompt();
           await deferredInstallPrompt.userChoice.catch(() => null);
           deferredInstallPrompt = null;
-          hideInstallButton();
-          return;
-        }
-
-        if (isIos) {
-          window.alert(
-            "Sur iPhone: ouvre le menu Partager dans Safari, puis choisis 'Sur l'ecran d'accueil'."
-          );
+          dismissed = true;
+          updateInstallPrompt();
+        } else if (isIos) {
+          window.alert("Sur iPhone : ouvrez le menu Partager dans Safari, puis choisissez ‘Sur l’écran d’accueil’.");
         }
       });
 
       document.addEventListener("click", (event) => {
+        if (!(event.target instanceof Element)) return;
         const button = event.target.closest("[data-password-toggle]");
         if (!button) return;
 

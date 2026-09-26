@@ -24,8 +24,9 @@
 
         const res = await fetch('/api/memberships', { credentials:'include' });
         const tb = document.querySelector('#tbl tbody');
+        if (!tb) return;
         if (!res.ok) { tb.innerHTML = `<tr><td colspan="2">Erreur ${res.status}</td></tr>`; return; }
-        const data = await res.json();
+        const data: { annee: number; annee_code?: string }[] = await res.json();
         if (!data.length) { tb.innerHTML = `<tr><td colspan="2">Aucune carte pour le moment</td></tr>`; return; }
         data.sort((a,b)=>b.annee-a.annee);
         tb.innerHTML = data.map(x => {

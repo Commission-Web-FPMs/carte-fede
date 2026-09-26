@@ -1,136 +1,83 @@
-// src/components/AdminUsersTable.tsx
-import { useEffect, useState } from "react";
-
-type Memberships = Record<string, string>; // { "2024": "A-12" }
-
-type User = {
-  id: number;
-  nom: string;
-  prenom: string;
-  identifiant?: string; // member_id ou email
-  cartes?: Memberships;
-  role: string;
-};
-
-const ALLOWED_PREFIXES = ["A","F","E","EA","MI","S"];
-const ROLE_OPTIONS = ["member","verifier","admin","en attente"];
-
-function currentAcademicStartYear() {
-  const d = new Date();
-  const y = d.getFullYear();
-  const m = d.getMonth() + 1;
-  return m >= 8 ? y : y - 1;
-}
-
-function makeYearRanges(countBefore = 2, countAfter = 6) {
-  const start = currentAcademicStartYear();
-  return Array.from({ length: countAfter + countBefore + 1 }, (_, k) => {
-    const y = start - countBefore + k;
-    return `${y}-${y + 1}`;
-  });
-}
+import { useEffect, useMemo, useRef, useState } from "react";
+import UserDetails from "./UserDetails";
+import {
+  filterUsers,
+  request,
+  ROLES,
+  roleLabel,
+  type User,
+} from "../lib/admin-users";
 
 export default function AdminUsersTable() {
   const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
-  const [editingUserId, setEditingUserId] = useState<number | null>(null);
-  const [editValues, setEditValues] = useState<{ nom: string; prenom: string; identifiant: string }>({ nom: "", prenom: "", identifiant: "" });
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  const [query, setQuery] = useState("");
+  const [role, setRole] = useState("");
+  const [selectedId, setSelectedId] = useState<number | null>(null);
+  const searchRef = useRef<HTMLInputElement>(null);
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
 
-  // ---------- API ----------
-  const fetchUsers = async () => {
-    const res = await fetch("/api/admin/users", { credentials: "include" });
-    if (!res.ok) throw new Error("Impossible de charger les utilisateurs");
-    const data: User[] = await res.json();
-    setUsers(data);
-  };
-
-  const ensureAdmin = async (): Promise<boolean> => {
-    const res = await fetch("/api/me", { credentials: "include" });
-    if (!res.ok) { window.location.href = "/login"; return false; }
-    const me = await res.json();
-    if (me.role !== "admin") { window.location.href = "/"; return false; }
-    return true;
-  };
-
-  useEffect(() => {
-    (async () => {
-      if (!(await ensureAdmin())) return;
-      await fetchUsers();
+  async function load() {
+    setLoading(true);
+    setError("");
+    try {
+      const response = await fetch("/api/me", { credentials: "include" });
+      if (response.status === 401) {
+        window.location.href = "/login";
+        return;
+      }
+      if (!response.ok)
+        throw new Error("Impossible de vérifier vos droits. Réessayez.");
+      const me = await response.json();
+      if (me.role !== "admin") {
+        window.location.href = "/";
+        return;
+      }
+      setUsers(await (await request("/api/admin/users")).json());
+    } catch (error) {
+      setError(
+        error instanceof Error
+          ? error.message
+          : "Impossible de charger les utilisateurs.",
+      );
+    } finally {
       setLoading(false);
-    })();
+    }
+  }
+  useEffect(() => {
+    void load();
   }, []);
 
-  // ---------- Cartes ----------
-  const addCard = async (userId: number, annee: string, prefix: string, num: number) => {
-    const annee_code = `${prefix}-${num}`;
-    const res = await fetch(`/api/admin/users/${userId}/annees`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      credentials: "include",
-      body: JSON.stringify({ annee, annee_code }),
+  const filtered = useMemo(
+    () => filterUsers(users, query, role),
+    [users, query, role],
+  );
+  const selected = users.find((user) => user.id === selectedId);
+  const totalCards = users.reduce(
+    (sum, user) => sum + Object.keys(user.cartes ?? {}).length,
+    0,
+  );
+  function open(user: User, trigger: HTMLButtonElement) {
+    triggerRef.current = trigger;
+    setNotice("");
+    setSelectedId(user.id);
+  }
+  function close() {
+    setSelectedId(null);
+    requestAnimationFrame(() => {
+      const trigger = triggerRef.current;
+      if (trigger?.isConnected && trigger.getClientRects().length)
+        trigger.focus();
+      else searchRef.current?.focus();
     });
-    if (!res.ok) { alert("Erreur lors de l'ajout de la carte"); return; }
-    await fetchUsers();
-  };
-
-  const removeCard = async (userId: number, annee: string) => {
-    if (!confirm(`Supprimer la carte pour ${annee} ?`)) return;
-    const res = await fetch(`/api/admin/users/${userId}/annees/${annee}`, {
-      method: "DELETE",
-      credentials: "include",
-    });
-    if (!res.ok) { alert("Erreur lors de la suppression"); return; }
-    await fetchUsers();
-  };
-
-  // ---------- Rôle ----------
-  const changeRole = async (userId: number, role: string) => {
-    const res = await fetch(`/api/admin/users/${userId}/role`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      credentials: "include",
-      body: JSON.stringify({ role }),
-    });
-    if (!res.ok) { alert("Erreur lors du changement de rôle"); return; }
-    await fetchUsers();
-  };
-
-  // ---------- Supprimer utilisateur ----------
-  const deleteUser = async (userId: number) => {
-    if (!confirm("Voulez-vous vraiment supprimer cet utilisateur ?")) return;
-    const res = await fetch(`/api/admin/users/${userId}`, {
-      method: "DELETE",
-      credentials: "include",
-    });
-    if (!res.ok) { alert("Erreur lors de la suppression de l'utilisateur"); return; }
-    await fetchUsers();
-  };
-
-  // ---------- Modifier utilisateur ----------
-  const saveUser = async (userId: number) => {
-    const res = await fetch(`/api/admin/users/${userId}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      credentials: "include",
-      body: JSON.stringify(editValues),
-    });
-    if (!res.ok) { alert("Erreur lors de la modification"); return; }
-    setEditingUserId(null);
-    await fetchUsers();
-  };
-
-  if (loading) return <p>Chargement...</p>;
-
-  const yearRanges = makeYearRanges();
-
-  const totalUsers = users.length;
-  const totalCards = users.reduce((sum, u) => sum + (u.cartes ? Object.keys(u.cartes).length : 0), 0);
-
+  }
   const downloadExcel = () => {
     if (!users.length) return;
     const yearSet = new Set<string>();
-    users.forEach(u => {
-      Object.keys(u.cartes ?? {}).forEach(year => yearSet.add(year));
+    users.forEach((u) => {
+      Object.keys(u.cartes ?? {}).forEach((year) => yearSet.add(year));
     });
     const yearColumns = Array.from(yearSet).sort((a, b) => {
       const numA = parseInt(a, 10);
@@ -141,16 +88,16 @@ export default function AdminUsersTable() {
       return b.localeCompare(a);
     });
     const header = ["Nom", "Prénom", "Identifiant", "Rôle", ...yearColumns];
-    const rows = users.map(u => [
+    const rows = users.map((u) => [
       u.nom,
       u.prenom,
       u.identifiant ?? "",
       u.role,
-      ...yearColumns.map(year => u.cartes?.[year] ?? ""),
+      ...yearColumns.map((year) => u.cartes?.[year] ?? ""),
     ]);
     const escapeCell = (value: string) => `"${value.replace(/"/g, '""')}"`;
     const tableContent = [header, ...rows]
-      .map(row => row.map(cell => escapeCell(String(cell ?? ""))).join(";"))
+      .map((row) => row.map((cell) => escapeCell(String(cell ?? ""))).join(";"))
       .join("\n");
     const blob = new Blob(["\uFEFF" + tableContent], {
       type: "application/vnd.ms-excel;charset=utf-8",
@@ -166,224 +113,242 @@ export default function AdminUsersTable() {
   };
 
   return (
-    <div className="w-full">
-      <div className="mb-4 flex flex-col gap-3 rounded-lg border border-gray-200 bg-white p-4 shadow-sm sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex flex-wrap gap-2">
-          <span className="rounded-full bg-blue-50 px-4 py-2 text-sm text-blue-700 sm:text-base">
-            <span className="font-semibold">{totalUsers}</span> utilisateurs
-          </span>
-          <span className="rounded-full bg-emerald-50 px-4 py-2 text-sm text-emerald-700 sm:text-base">
-            <span className="font-semibold">{totalCards}</span> cartes
-          </span>
+    <div className="admin-users grid min-w-0 gap-4">
+      <section
+        className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6"
+        aria-labelledby="users-title"
+      >
+        <div className="flex items-center justify-between gap-2">
+          <p className="text-xs font-semibold uppercase tracking-widest text-blue-700">
+            Espace admin
+          </p>
+          <button
+            type="button"
+            className="admin-button admin-secondary shrink-0 text-sm"
+            onClick={downloadExcel}
+            disabled={loading || !!error || !users.length}
+            aria-label="Exporter en Excel"
+          >
+            <span className="sm:hidden">Export Excel</span>
+            <span className="hidden sm:inline">Exporter en Excel</span>
+          </button>
         </div>
-        <button
-          type="button"
-          onClick={downloadExcel}
-          disabled={!totalUsers}
-          className="flex items-center gap-2 self-start rounded-full bg-gradient-to-r from-blue-600 to-blue-500 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:from-blue-700 hover:to-blue-600 disabled:cursor-not-allowed disabled:from-gray-400 disabled:text-gray-200 disabled:to-gray-400 disabled:shadow-none sm:self-auto sm:text-base"
+        <h1
+          id="users-title"
+          className="mt-2 text-xl font-semibold text-blue-900 sm:text-3xl"
         >
-          <span aria-hidden>📥</span>
-          Exporter en Excel
-        </button>
-      </div>
-      <div className="space-y-3 md:hidden">
-        {users.map((u) => (
-          <article key={u.id} className="rounded-xl border border-gray-200 bg-white p-3 shadow-sm">
-            <div className="mb-3 flex items-start justify-between gap-2">
-              <div>
-                <p className="text-base font-semibold text-slate-900">{u.prenom} {u.nom}</p>
-                <p className="text-xs text-slate-500">{u.identifiant ?? "Sans identifiant"}</p>
-              </div>
-              <select
-                value={u.role}
-                onChange={e => changeRole(u.id, e.target.value)}
-                className="rounded border border-gray-300 bg-white px-2 py-1 text-sm"
-              >
-                {ROLE_OPTIONS.map(r => <option key={r} value={r}>{r}</option>)}
-              </select>
-            </div>
-
-            {editingUserId === u.id ? (
-              <div className="mb-3 grid grid-cols-1 gap-2">
-                <input
-                  value={editValues.nom}
-                  onChange={e => setEditValues(prev => ({ ...prev, nom: e.target.value }))}
-                  className="w-full rounded border border-gray-300 p-2"
-                  placeholder="Nom"
-                />
-                <input
-                  value={editValues.prenom}
-                  onChange={e => setEditValues(prev => ({ ...prev, prenom: e.target.value }))}
-                  className="w-full rounded border border-gray-300 p-2"
-                  placeholder="Prénom"
-                />
-                <input
-                  value={editValues.identifiant}
-                  onChange={e => setEditValues(prev => ({ ...prev, identifiant: e.target.value }))}
-                  className="w-full rounded border border-gray-300 p-2"
-                  placeholder="Identifiant"
-                />
-              </div>
-            ) : null}
-
-            <div className="mb-3">
-              <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-500">Cartes</p>
-              <div className="space-y-1">
-                {u.cartes && Object.entries(u.cartes).length > 0
-                  ? Object.entries(u.cartes).sort((a, b) => Number(b[0]) - Number(a[0])).map(([annee, code]) => (
-                    <div key={annee} className="flex items-center justify-between rounded bg-slate-50 px-2 py-1 text-sm">
-                      <span>{annee} - {code}</span>
-                      <button className="rounded bg-red-100 px-2 py-1 text-xs font-semibold text-red-700" onClick={() => removeCard(u.id, annee)}>
-                        Suppr.
-                      </button>
-                    </div>
-                  ))
-                  : <span className="text-sm text-gray-400">Aucune carte</span>
-                }
-              </div>
-            </div>
-
-            <form
-              onSubmit={e => {
-                e.preventDefault();
-                const f = e.currentTarget as any;
-                const annee = f.annee.value;
-                const prefix = f.prefix.value;
-                const num = parseInt(f.num.value, 10);
-                addCard(u.id, annee, prefix, num);
-              }}
-              className="mb-3 grid grid-cols-1 gap-2"
+          Gestion des utilisateurs
+        </h1>
+        <p className="mt-1 text-sm text-slate-600">
+          Retrouvez et gérez les profils, rôles et cartes.
+        </p>
+        {!loading && !error && (
+          <div className="mt-3 flex flex-wrap gap-2 text-xs sm:text-sm">
+            <span className="rounded-full bg-blue-50 px-3 py-1 text-blue-900">
+              <strong>{users.length}</strong> utilisateurs
+            </span>
+            <span className="rounded-full bg-slate-100 px-3 py-1 text-slate-700">
+              <strong>{totalCards}</strong> cartes
+            </span>
+            <span className="hidden rounded-full bg-amber-50 px-3 py-1 text-amber-900 sm:inline-block">
+              <strong>
+                {users.filter((user) => user.role === "en attente").length}
+              </strong>{" "}
+              en attente
+            </span>
+          </div>
+        )}
+        <div className="mt-4 grid gap-3 sm:grid-cols-[1fr_12rem]">
+          <label className="admin-label">
+            Rechercher un utilisateur
+            <input
+              ref={searchRef}
+              className="admin-input"
+              type="search"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="Nom, prénom ou identifiant"
+              autoComplete="off"
+            />
+          </label>
+          <label className="admin-label flex items-center gap-3 sm:block">
+            Rôle
+            <select
+              className="admin-input mt-0 flex-1 sm:mt-2"
+              value={role}
+              onChange={(event) => setRole(event.target.value)}
             >
-              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Ajouter une carte</p>
-              <select name="annee" required className="w-full rounded border border-gray-300 p-2">
-                {yearRanges.map(y => <option key={y} value={y}>{y}</option>)}
-              </select>
-              <div className="grid grid-cols-2 gap-2">
-                <select name="prefix" required className="w-full rounded border border-gray-300 p-2">
-                  {ALLOWED_PREFIXES.map(p => <option key={p} value={p}>{p}</option>)}
-                </select>
-                <input name="num" type="number" min={1} placeholder="Numéro" required className="w-full rounded border border-gray-300 p-2" />
+              <option value="">Tous</option>
+              {ROLES.map(([value, label]) => (
+                <option key={value} value={value}>
+                  {label}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+      </section>
+      {notice && (
+        <p role="status" className="admin-success">
+          {notice}
+        </p>
+      )}
+      {loading ? (
+        <p role="status" className="rounded-2xl bg-white p-6 text-slate-600">
+          Chargement des utilisateurs…
+        </p>
+      ) : error ? (
+        <div className="admin-error" role="alert">
+          <p>{error}</p>
+          <button
+            className="admin-button admin-secondary mt-3"
+            onClick={() => void load()}
+          >
+            Réessayer
+          </button>
+        </div>
+      ) : (
+        <>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-sm text-slate-600" role="status">
+              {filtered.length} utilisateurs affichés sur {users.length}
+            </p>
+            {(query || role) && (
+              <button
+                className="admin-button text-sm text-blue-900"
+                onClick={() => {
+                  setQuery("");
+                  setRole("");
+                  searchRef.current?.focus();
+                }}
+              >
+                Effacer les filtres
+              </button>
+            )}
+          </div>
+          {!filtered.length ? (
+            <p className="rounded-2xl border border-dashed border-slate-300 bg-white p-6 text-slate-600">
+              {users.length
+                ? "Aucun utilisateur ne correspond à cette recherche."
+                : "Aucun utilisateur pour le moment."}
+            </p>
+          ) : (
+            <>
+              <ul className="space-y-2 md:hidden" aria-label="Utilisateurs">
+                {filtered.map((user) => (
+                  <li key={user.id}>
+                    <button
+                      type="button"
+                      className="flex w-full items-center gap-3 rounded-2xl border border-slate-200 bg-white p-3 text-left shadow-sm hover:border-blue-300"
+                      onClick={(event) => open(user, event.currentTarget)}
+                      aria-haspopup="dialog"
+                      aria-label={`Ouvrir la fiche de ${user.prenom} ${user.nom}`}
+                    >
+                      <span className="min-w-0 flex-1">
+                        <span className="block break-words font-semibold text-slate-900">
+                          {user.prenom} {user.nom}
+                        </span>
+                        <span className="block break-all text-sm text-slate-500">
+                          {user.identifiant || "Sans identifiant"}
+                        </span>
+                        <span className="mt-2 flex flex-wrap items-center gap-2 text-xs">
+                          <span className="admin-badge">
+                            {roleLabel(user.role)}
+                          </span>
+                          <span className="text-slate-600">
+                            {Object.keys(user.cartes ?? {}).length} carte(s)
+                          </span>
+                        </span>
+                      </span>
+                      <span
+                        aria-hidden="true"
+                        className="text-xl text-blue-900"
+                      >
+                        ›
+                      </span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+              <div className="hidden min-w-0 overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-sm md:block">
+                <table className="w-full text-left text-sm">
+                  <caption className="sr-only">
+                    Utilisateurs et accès à leur fiche de gestion
+                  </caption>
+                  <thead className="bg-slate-50 text-slate-600">
+                    <tr>
+                      {[
+                        "Nom",
+                        "Prénom",
+                        "Identifiant",
+                        "Rôle",
+                        "Cartes",
+                        "Actions",
+                      ].map((label) => (
+                        <th
+                          scope="col"
+                          key={label}
+                          className="whitespace-nowrap px-4 py-3 font-semibold"
+                        >
+                          {label}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {filtered.map((user) => (
+                      <tr key={user.id} className="hover:bg-blue-50/40">
+                        <td className="px-4 py-2 font-medium">{user.nom}</td>
+                        <td className="px-4 py-2">{user.prenom}</td>
+                        <td className="max-w-xs break-all px-4 py-2">
+                          {user.identifiant || "—"}
+                        </td>
+                        <td className="whitespace-nowrap px-4 py-2">
+                          <span className="admin-badge">
+                            {roleLabel(user.role)}
+                          </span>
+                        </td>
+                        <td className="px-4 py-2">
+                          {Object.keys(user.cartes ?? {}).length}
+                        </td>
+                        <td className="whitespace-nowrap px-4 py-2">
+                          <button
+                            className="admin-button admin-secondary"
+                            onClick={(event) => open(user, event.currentTarget)}
+                            aria-haspopup="dialog"
+                            aria-label={`Gérer ${user.prenom} ${user.nom}`}
+                          >
+                            Gérer
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
-              <button type="submit" className="rounded bg-blue-900 px-3 py-2 text-sm font-semibold text-white">Ajouter</button>
-            </form>
-
-            <div className="flex flex-wrap gap-2">
-              {editingUserId === u.id ? (
-                <>
-                  <button onClick={() => saveUser(u.id)} className="rounded bg-green-600 px-3 py-2 text-sm font-semibold text-white hover:bg-green-700">
-                    Enregistrer
-                  </button>
-                  <button onClick={() => setEditingUserId(null)} className="rounded bg-gray-400 px-3 py-2 text-sm font-semibold text-white hover:bg-gray-500">
-                    Annuler
-                  </button>
-                </>
-              ) : (
-                <>
-                  <button onClick={() => { setEditingUserId(u.id); setEditValues({ nom: u.nom, prenom: u.prenom, identifiant: u.identifiant ?? "" }); }} className="rounded bg-yellow-500 px-3 py-2 text-sm font-semibold text-white hover:bg-yellow-600">
-                    Modifier
-                  </button>
-                  <button onClick={() => deleteUser(u.id)} className="rounded bg-red-600 px-3 py-2 text-sm font-semibold text-white hover:bg-red-700">
-                    Supprimer
-                  </button>
-                </>
-              )}
-            </div>
-          </article>
-        ))}
-      </div>
-
-      <div className="hidden w-full overflow-x-auto md:block">
-        <table className="w-full border-collapse border">
-          <thead>
-            <tr>
-              <th className="border px-2 py-1">Nom</th>
-              <th className="border px-2 py-1">Prénom</th>
-              <th className="border px-2 py-1">Identifiant</th>
-              <th className="border px-2 py-1">Cartes</th>
-              <th className="border px-2 py-1">Ajouter une carte</th>
-              <th className="border px-2 py-1">Rôle</th>
-              <th className="border px-2 py-1">Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-          {users.map(u => (
-            <tr key={u.id}>
-              <td className="border px-2 py-1">
-                {editingUserId === u.id ? (
-                  <input
-                    value={editValues.nom}
-                    onChange={e => setEditValues(prev => ({ ...prev, nom: e.target.value }))}
-                    className="border p-1 rounded"
-                  />
-                ) : u.nom}
-              </td>
-              <td className="border px-2 py-1">
-                {editingUserId === u.id ? (
-                  <input
-                    value={editValues.prenom}
-                    onChange={e => setEditValues(prev => ({ ...prev, prenom: e.target.value }))}
-                    className="border p-1 rounded"
-                  />
-                ) : u.prenom}
-              </td>
-              <td className="border px-2 py-1">
-                {editingUserId === u.id ? (
-                  <input
-                    value={editValues.identifiant}
-                    onChange={e => setEditValues(prev => ({ ...prev, identifiant: e.target.value }))}
-                    className="border p-1 rounded"
-                  />
-                ) : u.identifiant ?? ""}
-              </td>
-              <td className="border px-2 py-1">
-                {u.cartes && Object.entries(u.cartes).length > 0
-                  ? Object.entries(u.cartes).sort((a,b)=>Number(b[0])-Number(a[0])).map(([annee, code])=>(
-                    <div key={annee}>
-                      {annee} → {code}{" "}
-                      <button className="text-red-600" onClick={()=>removeCard(u.id,annee)}>🗑</button>
-                    </div>
-                  ))
-                  : <span className="text-gray-400">—</span>
-                }
-              </td>
-              <td className="border px-2 py-1">
-                <form onSubmit={e => {
-                  e.preventDefault();
-                  const f = e.currentTarget as any;
-                  const annee = f.annee.value;
-                  const prefix = f.prefix.value;
-                  const num = parseInt(f.num.value,10);
-                  addCard(u.id, annee, prefix, num);
-                }} className="flex flex-col gap-1">
-                  <select name="annee" required>{yearRanges.map(y=><option key={y} value={y}>{y}</option>)}</select>
-                  <select name="prefix" required>{ALLOWED_PREFIXES.map(p=><option key={p} value={p}>{p}</option>)}</select>
-                  <input name="num" type="number" min={1} placeholder="Numéro" required />
-                  <button type="submit" className="bg-blue-900 text-white px-2 py-1 rounded">➕</button>
-                </form>
-              </td>
-              <td className="border px-2 py-1">
-                <select value={u.role} onChange={e=>changeRole(u.id,e.target.value)}>
-                  {ROLE_OPTIONS.map(r=><option key={r} value={r}>{r}</option>)}
-                </select>
-              </td>
-              <td className="border px-2 py-1 flex gap-1">
-                {editingUserId === u.id ? (
-                  <>
-                    <button onClick={()=>saveUser(u.id)} className="bg-green-600 text-white px-2 py-1 rounded hover:bg-green-700">💾</button>
-                    <button onClick={()=>setEditingUserId(null)} className="bg-gray-400 text-white px-2 py-1 rounded hover:bg-gray-500">✖</button>
-                  </>
-                ) : (
-                  <>
-                    <button onClick={()=>{setEditingUserId(u.id); setEditValues({nom:u.nom, prenom:u.prenom, identifiant:u.identifiant ?? ""})}} className="bg-yellow-500 px-2 py-1 rounded hover:bg-yellow-600">✏️</button>
-                    <button onClick={()=>deleteUser(u.id)} className="bg-red-600 text-white px-2 py-1 rounded hover:bg-red-700">🗑</button>
-                  </>
-                )}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-        </table>
-      </div>
+            </>
+          )}
+        </>
+      )}
+      {selected && (
+        <UserDetails
+          key={selected.id}
+          user={selected}
+          onClose={close}
+          onChange={(updated) =>
+            setUsers((previous) =>
+              previous.map((user) => (user.id === updated.id ? updated : user)),
+            )
+          }
+          onDelete={() => {
+            setUsers((previous) =>
+              previous.filter((user) => user.id !== selected.id),
+            );
+            setNotice("Utilisateur supprimé.");
+            close();
+          }}
+        />
+      )}
     </div>
   );
 }
