@@ -53,10 +53,15 @@ class PendingRegistration(db.Model):
     id = db.Column(db.String, primary_key=True, default=lambda: str(uuid.uuid4()))
     nom = db.Column(db.String(100), nullable=False)
     prenom = db.Column(db.String(100), nullable=False)
-    member_id = db.Column(db.String(6), unique=True, nullable=False)
+    member_id = db.Column(db.String(6), unique=True, nullable=True)
+    email = db.Column(db.String(254), unique=True, nullable=True)
     password_hash = db.Column(db.String, nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
     expires_at = db.Column(db.DateTime, nullable=False, index=True)
+
+    __table_args__ = (
+        db.CheckConstraint("(member_id IS NOT NULL) <> (email IS NOT NULL)", name="pending_registration_one_identifier"),
+    )
 
 class PendingCardRequest(db.Model):
     __tablename__ = "pending_card_request"

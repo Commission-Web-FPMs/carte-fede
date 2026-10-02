@@ -51,7 +51,7 @@ def pending_requests():
     cards = PendingCardRequest.query.filter_by(status="pending").order_by(PendingCardRequest.created_at.asc()).all()
     return jsonify({
         "registrations": [{"id": row.id, "nom": row.nom, "prenom": row.prenom,
-                           "member_id": row.member_id, "created_at": row.created_at.isoformat(),
+                           "member_id": row.member_id, "email": row.email, "created_at": row.created_at.isoformat(),
                            "expires_at": row.expires_at.isoformat()} for row in registrations],
         "cards": [{"id": row.id, "annee": row.annee, "nom": row.user.nom,
                    "prenom": row.user.prenom, "identifiant": row.user.member_id or row.user.email,
@@ -70,8 +70,10 @@ def decide_registration(request_id, decision):
         db.session.delete(row)
         db.session.commit()
         return jsonify({"ok": True})
-    if User.query.filter_by(member_id=row.member_id).first():
-        return jsonify({"error": "Un compte existe déjà avec ce matricule."}), 409
+    if (row.member_id and User.query.filter_by(member_id=row.member_id).first()) or (
+        row.email and User.query.filter(db.func.lower(User.email) == row.email).first()
+    ):
+        return jsonify({"error": "Un compte existe déjà avec cet identifiant."}), 409
     data = request.get_json(silent=True) or {}
     if not isinstance(data, dict):
         return jsonify({"error": "Données invalides."}), 400
@@ -80,7 +82,7 @@ def decide_registration(request_id, decision):
     prefix = str(data.get("prefix") or "A").upper()
     if add_card and (type(year) is not int or year not in (current_academic_year(), current_academic_year() + 1) or prefix not in ALLOWED_PREFIXES):
         return jsonify({"error": "Année ou préfixe de carte invalide."}), 400
-    user = User(nom=row.nom, prenom=row.prenom, member_id=row.member_id,
+    user = User(nom=row.nom, prenom=row.prenom, member_id=row.member_id, email=row.email,
                 password_hash=row.password_hash, role=Role.MEMBER)
     try:
         db.session.add(user)

@@ -5,6 +5,7 @@ from werkzeug.security import generate_password_hash, check_password_hash
 from itsdangerous import BadSignature, SignatureExpired
 from .email_utils import send_email
 from .password_reset import generate_reset_token, verify_reset_token
+from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from datetime import datetime, timedelta
 import re
@@ -68,28 +69,38 @@ def me():
 def register():
     try:
         data = request.get_json(silent=True) or {}
-        if not isinstance(data, dict) or not all(isinstance(data.get(field), str) for field in ("nom", "prenom", "member_id", "password", "password2")):
+        if not isinstance(data, dict) or not all(isinstance(data.get(field), str) for field in ("nom", "prenom", "password", "password2")) or not all(isinstance(data.get(field, ""), str) for field in ("member_id", "email")):
             return jsonify({"error": "Champs d'inscription invalides."}), 400
         password = data["password"]
         nom = data["nom"].strip()
         prenom = data["prenom"].strip()
-        member_id = data["member_id"].strip()
-        if not nom or not prenom or not re.fullmatch(r"[0-9]{6}", member_id):
-            return jsonify({"error": "Nom, prénom et matricule à 6 chiffres requis."}), 400
+        member_id = data.get("member_id", "").strip()
+        email = data.get("email", "").strip().lower()
+        if not nom or not prenom or bool(member_id) == bool(email):
+            return jsonify({"error": "Nom, prénom et un seul identifiant (matricule ou email) requis."}), 400
+        if member_id and not re.fullmatch(r"[0-9]{6}", member_id):
+            return jsonify({"error": "Le matricule doit contenir 6 chiffres."}), 400
+        if email and (len(email) > 254 or not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email)):
+            return jsonify({"error": "Adresse email invalide."}), 400
         if len(nom) > 100 or len(prenom) > 100 or not 8 <= len(password) <= 128:
             return jsonify({"error": "Nom/prénom trop long ou mot de passe hors limite (8 à 128 caractères)."}), 400
         if password != data.get("password2"):
             return jsonify({"error": "Les mots de passe ne correspondent pas."}), 400
-        if User.query.filter_by(member_id=member_id).first():
-            return jsonify({"error": "Un compte existe déjà avec ce matricule."}), 409
+        if (member_id and User.query.filter_by(member_id=member_id).first()) or (
+            email and User.query.filter(func.lower(User.email) == email).first()
+        ):
+            return jsonify({"error": "Un compte existe déjà avec cet identifiant."}), 409
 
         # Expired rows are discarded on access; no background scheduler is needed.
         PendingRegistration.query.filter(PendingRegistration.expires_at <= datetime.utcnow()).delete()
-        if PendingRegistration.query.filter_by(member_id=member_id).first():
+        if (member_id and PendingRegistration.query.filter_by(member_id=member_id).first()) or (
+            email and PendingRegistration.query.filter(func.lower(PendingRegistration.email) == email).first()
+        ):
             db.session.rollback()
-            return jsonify({"error": "Une inscription est déjà en attente pour ce matricule."}), 409
+            return jsonify({"error": "Une inscription est déjà en attente pour cet identifiant."}), 409
         pending = PendingRegistration(
-            member_id=member_id,
+            member_id=member_id or None,
+            email=email or None,
             nom=nom,
             prenom=prenom,
             password_hash=generate_password_hash(password),
@@ -100,7 +111,7 @@ def register():
             db.session.commit()
         except IntegrityError:
             db.session.rollback()
-            return jsonify({"error": "Une inscription est déjà en attente pour ce matricule."}), 409
+            return jsonify({"error": "Une inscription est déjà en attente pour cet identifiant."}), 409
         return jsonify({"ok": True, "expires_at": pending.expires_at.isoformat()}), 202
     except Exception:
         db.session.rollback()
