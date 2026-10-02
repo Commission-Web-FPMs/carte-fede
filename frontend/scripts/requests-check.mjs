@@ -65,9 +65,21 @@ try {
   const member = await browser.newPage({ viewport: { width: 375, height: 700 }, serviceWorkers: "block" });
   member.on("pageerror", error => errors.push(error.message));
   let requestedYear = null;
-  await member.route("**/api/**", route => {
+  let failRequests = false;
+  let releaseCards;
+  const requestsStarted = new Promise(resolve => { releaseCards = resolve; });
+  await member.route("**/api/**", async route => {
     const url = new URL(route.request().url()).pathname;
     if (url === "/api/me") return route.fulfill({ json: { role: "member", identifiant: "654321" } });
+    if (failRequests && url === "/api/memberships") {
+      // Cards cannot finish before the independent requests endpoint has started.
+      await requestsStarted;
+      return route.fulfill({ json: [{ annee: year, annee_code: "A-123" }] });
+    }
+    if (failRequests && url === "/api/memberships/requests") {
+      releaseCards();
+      return route.abort();
+    }
     if (url === "/api/memberships" || url === "/api/memberships/requests" && route.request().method() === "GET") return route.fulfill({ json: [] });
     if (url === "/api/memberships/requests") {
       requestedYear = route.request().postDataJSON().annee;
@@ -80,8 +92,12 @@ try {
   await member.getByText("Demande envoyée : un administrateur doit la valider.").waitFor();
   assert.equal(requestedYear, year);
   assert.ok(await member.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
+  failRequests = true;
+  await member.reload();
+  await member.getByText("A - 123", { exact: true }).waitFor();
+  await member.getByText("Impossible de charger vos demandes de carte. Réessayez en rechargeant la page.").waitFor();
   assert.deepEqual(errors, []);
-  console.log("PASS inscription publique, validation admin, attribution admin et demande de carte mobile");
+  console.log("PASS inscription, validations admin, demande de carte et chargement parallèle résilient");
 } finally {
   await browser.close();
 }

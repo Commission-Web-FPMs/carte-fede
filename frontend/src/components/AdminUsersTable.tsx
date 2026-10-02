@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { fetchCurrentUser } from "../lib/current-user";
 import UserDetails from "./UserDetails";
 import AdminRequests from "./AdminRequests";
 import {
@@ -24,7 +25,7 @@ export default function AdminUsersTable() {
     setLoading(true);
     setError("");
     try {
-      const response = await fetch("/api/me", { credentials: "include" });
+      const response = await fetchCurrentUser();
       if (response.status === 401) {
         window.location.href = "/login";
         return;

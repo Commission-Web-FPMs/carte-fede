@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { fetchCurrentUser } from "../lib/current-user";
 
 type Msg = { type?: "ok" | "err"; text: string };
 
@@ -9,7 +10,7 @@ export default function Carte() {
   useEffect(() => {
     (async () => {
       try {
-        const r = await fetch("/api/me", { credentials: "include" });
+        const r = await fetchCurrentUser();
         if (!r.ok) {
           location.href = "/login?next=" + encodeURIComponent(location.pathname);
           return;

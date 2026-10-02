@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { fetchCurrentUser } from "../lib/current-user";
 
 type Membership = { annee: number; annee_code?: string };
 
@@ -9,7 +10,7 @@ export default function MembershipTable() {
   useEffect(() => {
     const fetchData = async () => {
       setLoading(true);
-      const me = await fetch("/api/me", { credentials: "include" });
+      const me = await fetchCurrentUser();
       if (!me.ok) return (window.location.href = "/login?next=" + encodeURIComponent(window.location.pathname));
 
       const res = await fetch("/api/memberships", { credentials: "include" });

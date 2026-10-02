@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { fetchCurrentUser } from "../../lib/current-user";
 import { academicYear, currentYear, request } from "../../lib/admin-users";
 
 type Membership = {
@@ -29,27 +30,30 @@ export default function AppCartes() {
   useEffect(() => {
     const load = async () => {
       try {
-        const me = await fetch("/api/me", { credentials: "include" });
+        const me = await fetchCurrentUser();
         if (!me.ok) {
           window.location.href =
             "/login?next=" + encodeURIComponent(window.location.pathname);
           return;
         }
 
-        const res = await fetch("/api/memberships", { credentials: "include" });
-        if (!res.ok) {
-          setMemberships([]);
-          return;
-        }
-
-        const data = await res.json();
-        const list = Array.isArray(data) ? data : [];
-        list.sort((a: Membership, b: Membership) => b.annee - a.annee);
-        setMemberships(list);
-        const pending = await fetch("/api/memberships/requests", {
-          credentials: "include",
-        });
-        if (pending.ok) setRequests(await pending.json());
+        await Promise.all([
+          request("/api/memberships")
+            .then((response) => response.json())
+            .then((data) => {
+              const list = Array.isArray(data) ? data : [];
+              list.sort((a: Membership, b: Membership) => b.annee - a.annee);
+              setMemberships(list);
+            })
+            .catch(() => setMemberships([])),
+          request("/api/memberships/requests")
+            .then((response) => response.json())
+            .then(setRequests)
+            .catch(() => {
+              setRequestError(true);
+              setRequestMessage("Impossible de charger vos demandes de carte. Réessayez en rechargeant la page.");
+            }),
+        ]);
       } catch {
         setMemberships([]);
       } finally {
