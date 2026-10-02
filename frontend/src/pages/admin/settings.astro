@@ -1,0 +1,67 @@
+---
+import Layout from "../../layouts/Layout.astro";
+---
+
+<Layout title="Paramètres de la carte Fédé">
+  <main class="min-h-[calc(100dvh-8rem)] bg-gradient-to-b from-slate-50 to-blue-50/40 px-4 py-8">
+    <section class="mx-auto max-w-2xl rounded-3xl border border-slate-200 bg-white p-5 shadow-sm sm:p-8">
+      <p class="text-xs font-semibold uppercase tracking-widest text-blue-700">Administration</p>
+      <h1 class="mt-2 text-2xl font-semibold text-blue-900">Paramètres de la carte Fédé</h1>
+      <p class="mt-2 text-sm text-slate-600">Ces informations apparaissent sur l’inscription et dans le QR de virement. Vérifiez-les avant d’enregistrer.</p>
+      <form id="settingsForm" hidden class="mt-6 hidden gap-4">
+        <label class="block text-sm font-medium text-slate-700">Nom du bénéficiaire<input name="beneficiary" required maxlength="70" class="mt-2 min-h-11 w-full rounded-xl border border-slate-300 px-3 text-base focus-visible:outline-blue-600" /></label>
+        <label class="block text-sm font-medium text-slate-700">IBAN<input name="iban" required maxlength="42" autocomplete="off" class="mt-2 min-h-11 w-full rounded-xl border border-slate-300 px-3 text-base uppercase focus-visible:outline-blue-600" /></label>
+        <label class="block text-sm font-medium text-slate-700">BIC (si nécessaire)<input name="bic" maxlength="11" autocomplete="off" class="mt-2 min-h-11 w-full rounded-xl border border-slate-300 px-3 text-base uppercase focus-visible:outline-blue-600" /></label>
+        <label class="block text-sm font-medium text-slate-700">Montant de la carte Fédé (€)<input name="amount" type="number" min="0.01" max="99999999.99" step="0.01" inputmode="decimal" required class="mt-2 min-h-11 w-full rounded-xl border border-slate-300 px-3 text-base focus-visible:outline-blue-600" /></label>
+        <label class="block text-sm font-medium text-slate-700">Libellé de communication<input name="communication_prefix" required maxlength="60" class="mt-2 min-h-11 w-full rounded-xl border border-slate-300 px-3 text-base focus-visible:outline-blue-600" /></label>
+        <p class="text-sm text-slate-600">Exemple : NOM Prénom – <span id="communicationExample">Carte Fédé</span> <span id="yearExample"></span></p>
+        <button id="saveSettings" class="min-h-11 rounded-xl bg-blue-900 px-4 py-2 font-semibold text-white disabled:opacity-60">Enregistrer les paramètres</button>
+      </form>
+      <p id="settingsMessage" role="status" aria-live="polite" class="mt-4 text-sm text-slate-700">Chargement des paramètres…</p>
+    </section>
+  </main>
+</Layout>
+
+<script>
+  const form = document.getElementById("settingsForm") as HTMLFormElement;
+  const message = document.getElementById("settingsMessage") as HTMLElement;
+  const save = document.getElementById("saveSettings") as HTMLButtonElement;
+  const example = document.getElementById("communicationExample") as HTMLElement;
+  const year = document.getElementById("yearExample") as HTMLElement;
+  const fields = ["beneficiary", "iban", "bic", "amount", "communication_prefix"] as const;
+  async function load() {
+    try {
+      const me = await fetch("/api/me", { credentials: "include" });
+      if (me.status === 401) { location.href = "/login?next=/admin/settings"; return; }
+      if (!me.ok || (await me.json()).role !== "admin") { location.href = "/"; return; }
+      const response = await fetch("/api/admin/card-payment", { credentials: "include" });
+      if (!response.ok) throw new Error("Chargement impossible.");
+      const data = await response.json();
+      for (const field of fields) (form.elements.namedItem(field) as HTMLInputElement).value = data[field] || "";
+      year.textContent = `${data.annee}-${data.annee + 1}`;
+      example.textContent = data.communication_prefix || "Carte Fédé";
+      form.hidden = false;
+      form.classList.remove("hidden");
+      form.classList.add("grid");
+      message.textContent = "";
+    } catch { message.textContent = "Impossible de charger les paramètres. Rechargez la page."; message.className = "mt-4 text-sm text-red-700"; }
+  }
+  void load();
+  form.addEventListener("input", () => { example.textContent = (form.elements.namedItem("communication_prefix") as HTMLInputElement).value || "Carte Fédé"; });
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    save.disabled = true;
+    save.textContent = "Enregistrement…";
+    message.textContent = "";
+    try {
+      const values = Object.fromEntries(new FormData(form).entries());
+      const response = await fetch("/api/admin/card-payment", { method: "PUT", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify(values) });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || "Enregistrement impossible.");
+      (form.elements.namedItem("iban") as HTMLInputElement).value = data.iban;
+      message.textContent = "Paramètres enregistrés.";
+      message.className = "mt-4 text-sm text-emerald-800";
+    } catch (error) { message.textContent = error instanceof Error ? error.message : "Enregistrement impossible."; message.className = "mt-4 text-sm text-red-700"; }
+    finally { save.disabled = false; save.textContent = "Enregistrer les paramètres"; }
+  });
+</script>

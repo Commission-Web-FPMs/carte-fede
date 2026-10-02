@@ -97,12 +97,27 @@ import Layout from "@layouts/Layout.astro";
             class="mt-2 min-h-11 w-full rounded-xl border border-slate-300 px-3 text-base focus-visible:outline-blue-600"
           />
         </label>
+        <label class="flex min-h-11 items-start gap-3 text-sm font-medium text-slate-700">
+          <input id="freeCard" name="free_card_requested" type="checkbox" class="mt-1 size-5 shrink-0 accent-blue-900" />
+          Je suis étudiant·e en BAC1 Polytech et je souhaite bénéficier de la carte Fédé gratuite.
+        </label>
         <button
           id="submitRegistration"
           class="min-h-11 rounded-xl bg-blue-900 px-4 py-2 font-semibold text-white hover:bg-blue-800 disabled:opacity-60"
           >Envoyer ma demande</button
         >
       </form>
+      <section id="paymentSection" aria-labelledby="paymentTitle" class="mt-6 rounded-2xl border border-blue-200 bg-blue-50 p-4 sm:p-5">
+        <h2 id="paymentTitle" class="text-lg font-semibold text-blue-900">Validation de la carte Fédé</h2>
+        <p class="mt-2 text-sm text-slate-700">Afin de valider votre carte Fédé, effectuez un virement au trésorier de la Fédé avec la communication suivante :</p>
+        <p id="paymentCommunication" class="mt-3 break-words rounded-xl bg-white p-3 font-semibold text-slate-900"></p>
+        <div id="paymentDetails" class="mt-3 text-sm text-slate-700"></div>
+        <button id="generatePaymentQr" type="button" class="mt-4 min-h-11 rounded-xl bg-blue-900 px-4 py-2 font-semibold text-white disabled:opacity-60">Générer le QR de paiement EPC</button>
+        <p id="paymentError" role="alert" class="mt-2 text-sm text-red-700"></p>
+        <img id="paymentQr" hidden alt="QR de paiement EPC à scanner dans votre application bancaire" class="mt-4 w-56 max-w-full rounded-xl border border-slate-200 bg-white p-2" />
+        <p class="mt-3 text-xs text-slate-600">Le virement ne valide pas automatiquement la carte : un administrateur vérifie le paiement puis attribue la carte.</p>
+      </section>
+      <p id="freeCardNotice" hidden class="mt-5 rounded-xl bg-emerald-50 p-3 text-sm text-emerald-900">Aucun paiement immédiat n’est demandé. Un administrateur examinera votre demande de gratuité BAC1 Polytech et validera la carte séparément.</p>
       <p
         id="registrationMessage"
         role="status"
@@ -120,6 +135,57 @@ import Layout from "@layouts/Layout.astro";
 </Layout>
 
 <script>
+  type Payment = { annee: number; beneficiary: string; iban: string; bic: string; amount: string; communication_prefix: string };
+  const form = document.getElementById("signupForm") as HTMLFormElement | null;
+  const freeCard = document.getElementById("freeCard") as HTMLInputElement | null;
+  const paymentSection = document.getElementById("paymentSection");
+  const freeCardNotice = document.getElementById("freeCardNotice");
+  const communication = document.getElementById("paymentCommunication");
+  const details = document.getElementById("paymentDetails");
+  const qrButton = document.getElementById("generatePaymentQr") as HTMLButtonElement | null;
+  const qrImage = document.getElementById("paymentQr") as HTMLImageElement | null;
+  const paymentError = document.getElementById("paymentError");
+  let payment: Payment | null = null;
+  let paymentQrUrl = "";
+  let submittedName: { nom: string; prenom: string } | null = null;
+  let submittedFree = false;
+  function updatePayment() {
+    if (!form || !freeCard || !paymentSection || !freeCardNotice || !communication || !details || !qrButton) return;
+    paymentSection.hidden = submittedName ? submittedFree : freeCard.checked;
+    freeCardNotice.hidden = submittedName ? !submittedFree : !freeCard.checked;
+    const nom = (form.elements.namedItem("nom") as HTMLInputElement)?.value.trim().toUpperCase() || submittedName?.nom || "NOM";
+    const prenom = (form.elements.namedItem("prenom") as HTMLInputElement)?.value.trim() || submittedName?.prenom || "Prénom";
+    const year = payment?.annee ?? new Date().getFullYear() - (new Date().getMonth() < 7 ? 1 : 0);
+    communication.textContent = `${nom} ${prenom} – ${payment?.communication_prefix || "Carte Fédé"} ${year}-${year + 1}`;
+    details.textContent = payment?.beneficiary && payment?.iban && payment?.amount
+      ? `Bénéficiaire : ${payment.beneficiary} · IBAN : ${payment.iban} · Montant : ${payment.amount} €${payment.bic ? ` · BIC : ${payment.bic}` : ""}`
+      : "Les coordonnées de paiement ne sont pas encore configurées. Revenez plus tard avant d’effectuer un virement.";
+    qrButton.disabled = !payment?.beneficiary || !payment?.iban || !payment?.amount;
+  }
+  fetch("/api/card-payment", { cache: "no-store" })
+    .then((response) => { if (!response.ok) throw new Error(); return response.json(); })
+    .then((data: Payment) => { payment = data; updatePayment(); })
+    .catch(() => { if (details) details.textContent = "Coordonnées de paiement indisponibles. Réessayez plus tard."; if (qrButton) qrButton.disabled = true; });
+  form?.addEventListener("input", () => { if (qrImage) qrImage.hidden = true; updatePayment(); });
+  freeCard?.addEventListener("change", updatePayment);
+  updatePayment();
+  qrButton?.addEventListener("click", async () => {
+    if (!qrImage || !paymentError || !form || !qrButton) return;
+    const nom = (form.elements.namedItem("nom") as HTMLInputElement)?.value.trim() || submittedName?.nom;
+    const prenom = (form.elements.namedItem("prenom") as HTMLInputElement)?.value.trim() || submittedName?.prenom;
+    if (!nom || !prenom) { paymentError.textContent = "Renseignez votre nom et votre prénom avant de générer le QR."; return; }
+    qrButton.disabled = true;
+    paymentError.textContent = "";
+    try {
+      const response = await fetch("/api/card-payment/qr", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ nom, prenom }) });
+      if (!response.ok) { const result = await response.json().catch(() => ({})); throw new Error(result.error || "QR de paiement indisponible."); }
+      if (paymentQrUrl) URL.revokeObjectURL(paymentQrUrl);
+      paymentQrUrl = URL.createObjectURL(await response.blob());
+      qrImage.src = paymentQrUrl;
+      qrImage.hidden = false;
+    } catch (error) { paymentError.textContent = error instanceof Error ? error.message : "QR de paiement indisponible."; }
+    finally { qrButton.disabled = false; }
+  });
   const nonUmons = document.getElementById("nonUmons") as HTMLInputElement | null;
   const memberGroup = document.getElementById("umonsIdentifier");
   const emailGroup = document.getElementById("emailIdentifier");
@@ -149,7 +215,8 @@ import Layout from "@layouts/Layout.astro";
         "submitRegistration",
       ) as HTMLButtonElement | null;
       if (!message || !button) return;
-      const values = Object.fromEntries(new FormData(form).entries());
+      const values: Record<string, FormDataEntryValue | boolean> = Object.fromEntries(new FormData(form).entries());
+      values.free_card_requested = freeCard?.checked ?? false;
       if (values.password !== values.password2) {
         message.textContent = "Les mots de passe ne correspondent pas.";
         message.className = "mt-4 text-sm text-red-700";
@@ -173,7 +240,14 @@ import Layout from "@layouts/Layout.astro";
               : result.error || "La demande n’a pas pu être envoyée.",
           );
         form.reset();
+        submittedName = { nom: String(values.nom).trim().toUpperCase(), prenom: String(values.prenom).trim() };
+        submittedFree = values.free_card_requested === true;
+        if (payment && typeof result.card_year === "number" && payment.annee !== result.card_year) {
+          payment.annee = result.card_year;
+          if (qrImage) qrImage.hidden = true;
+        }
         form.style.display = "none";
+        updatePayment();
         message.textContent =
           "Demande envoyée. Un administrateur doit la valider avant votre première connexion.";
         message.className =

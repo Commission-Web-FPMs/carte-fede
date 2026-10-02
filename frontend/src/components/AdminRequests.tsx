@@ -1,7 +1,6 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useState } from "react";
 import {
   academicYear,
-  currentYear,
   PREFIXES,
   request,
 } from "../lib/admin-users";
@@ -13,6 +12,7 @@ type Registration = {
   member_id: string | null;
   email: string | null;
   expires_at: string;
+  free_card_requested: boolean;
 };
 type CardRequest = {
   id: string;
@@ -20,6 +20,8 @@ type CardRequest = {
   prenom: string;
   identifiant: string;
   annee: number;
+  status: "payment_required" | "pending";
+  free_card: boolean;
 };
 type Queue = { registrations: Registration[]; cards: CardRequest[] };
 
@@ -33,7 +35,6 @@ export default function AdminRequests({
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [confirmReject, setConfirmReject] = useState("");
-  const [cardFor, setCardFor] = useState("");
   const [loading, setLoading] = useState(true);
 
   async function load() {
@@ -57,7 +58,7 @@ export default function AdminRequests({
   async function decide(
     kind: "registrations" | "card-requests",
     id: string,
-    decision: "approve" | "reject",
+    decision: "approve" | "reject" | "payment-received",
     body: object = {},
   ) {
     if (busy) return;
@@ -70,7 +71,7 @@ export default function AdminRequests({
       if (decision === "approve") onChanged();
       setConfirmReject("");
       setNotice(
-        decision === "approve" ? "Demande validée." : "Demande refusée.",
+        decision === "approve" ? "Demande validée." : decision === "payment-received" ? "Paiement reçu : la carte peut maintenant être attribuée." : "Demande refusée.",
       );
     } catch (cause) {
       setError(
@@ -81,16 +82,6 @@ export default function AdminRequests({
     } finally {
       setBusy("");
     }
-  }
-
-  function approveRegistration(event: FormEvent<HTMLFormElement>, id: string) {
-    event.preventDefault();
-    const values = new FormData(event.currentTarget);
-    void decide("registrations", id, "approve", {
-      add_card: values.has("add_card"),
-      annee: Number(values.get("annee")),
-      prefix: values.get("prefix"),
-    });
   }
 
   return (
@@ -148,47 +139,15 @@ export default function AdminRequests({
                       "fr-BE",
                     )}
                   </p>
-                  <form
-                    className="mt-3 space-y-3"
-                    onSubmit={(event) => approveRegistration(event, item.id)}
-                  >
-                    <label className="flex min-h-11 items-center gap-2 text-sm text-slate-700">
-                      <input
-                        type="checkbox"
-                        name="add_card"
-                        checked={cardFor === item.id}
-                        onChange={(event) =>
-                          setCardFor(event.target.checked ? item.id : "")
-                        }
-                      />{" "}
-                      Ajouter une carte lors de la validation
-                    </label>
-                    {cardFor === item.id && (
-                      <div className="grid grid-cols-2 gap-2">
-                        <label className="admin-label">
-                          Année
-                          <select name="annee" className="admin-input">
-                            {[currentYear(), currentYear() + 1].map((year) => (
-                              <option key={year} value={year}>
-                                {academicYear(String(year))}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
-                        <label className="admin-label">
-                          Préfixe
-                          <select name="prefix" className="admin-input">
-                            {PREFIXES.map((prefix) => (
-                              <option key={prefix}>{prefix}</option>
-                            ))}
-                          </select>
-                        </label>
-                      </div>
-                    )}
-                    <div className="flex flex-wrap gap-2">
+                  <p className="mt-2 text-sm font-medium text-blue-900">
+                    {item.free_card_requested ? "Carte gratuite BAC1 Polytech demandée : à examiner après validation du compte." : "Carte : paiement requis après validation du compte."}
+                  </p>
+                  <div className="mt-3 flex flex-wrap gap-2">
                       <button
+                        type="button"
                         className="admin-button admin-primary"
                         disabled={!!busy}
+                        onClick={() => void decide("registrations", item.id, "approve")}
                       >
                         {busy === item.id ? "Validation…" : "Valider le compte"}
                       </button>
@@ -200,8 +159,7 @@ export default function AdminRequests({
                       >
                         Refuser
                       </button>
-                    </div>
-                  </form>
+                  </div>
                   {confirmReject === `registration:${item.id}` && (
                     <div className="mt-3 rounded-xl border border-red-200 p-3 text-sm">
                       <p>
@@ -246,6 +204,13 @@ export default function AdminRequests({
                   <p className="break-all text-sm text-slate-600">
                     {item.identifiant} · {academicYear(String(item.annee))}
                   </p>
+                  <p className="mt-2 text-sm font-medium text-blue-900">
+                    {item.free_card ? "Gratuité BAC1 Polytech demandée · En attente de validation" : item.status === "payment_required" ? "Paiement requis · À vérifier avant attribution" : "En attente de validation"}
+                  </p>
+                  {item.status === "payment_required" && !item.free_card && (
+                    <button type="button" className="admin-button admin-secondary mt-3" disabled={!!busy}
+                      onClick={() => void decide("card-requests", item.id, "payment-received")}>Paiement reçu</button>
+                  )}
                   <form
                     className="mt-3 flex flex-wrap items-end gap-2"
                     onSubmit={(event) => {
@@ -265,7 +230,7 @@ export default function AdminRequests({
                     </label>
                     <button
                       className="admin-button admin-primary"
-                      disabled={!!busy}
+                      disabled={!!busy || item.status === "payment_required"}
                     >
                       {busy === item.id ? "Validation…" : "Attribuer la carte"}
                     </button>

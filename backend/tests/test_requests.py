@@ -10,8 +10,9 @@ from datetime import datetime, timedelta
 from werkzeug.security import check_password_hash, generate_password_hash
 
 from app import create_app
-from app.models import db, Membership, PendingCardRequest, PendingRegistration, Role, User
+from app.models import db, CardPaymentSettings, Membership, PendingCardRequest, PendingRegistration, Role, User
 from app.routes_memberships import current_academic_year
+from app.card_payment import epc_payload
 
 
 class RequestsFlowTest(unittest.TestCase):
@@ -75,12 +76,14 @@ class RequestsFlowTest(unittest.TestCase):
         self.assertEqual(self.post(self.member, "/api/memberships/requests", {"annee": float(year) + .5}).status_code, 400)
         self.assertEqual(self.post(self.member, "/api/memberships/requests", {"annee": year + 1}).status_code, 202)
         self.assertEqual(self.post(self.member, "/api/memberships/requests", {"annee": year + 1}).status_code, 409)
-        self.assertEqual(self.get(self.member, "/api/memberships/requests").json[0]["status"], "pending")
+        self.assertEqual(self.get(self.member, "/api/memberships/requests").json[0]["status"], "payment_required")
         with self.app.app_context():
             card_id = PendingCardRequest.query.one().id
         self.assertEqual(self.post(self.admin, f"/api/admin/card-requests/{card_id}/reject").status_code, 200)
         self.assertEqual(self.get(self.member, "/api/memberships/requests").json[0]["status"], "rejected")
         self.assertEqual(self.post(self.member, "/api/memberships/requests", {"annee": year + 1}).status_code, 202)
+        self.assertEqual(self.post(self.admin, f"/api/admin/card-requests/{card_id}/approve", {"prefix": "EA"}).status_code, 409)
+        self.assertEqual(self.post(self.admin, f"/api/admin/card-requests/{card_id}/payment-received").status_code, 200)
         self.assertEqual(self.post(self.admin, f"/api/admin/card-requests/{card_id}/approve", {"prefix": "EA"}).status_code, 200)
         with self.app.app_context():
             self.assertEqual(Membership.query.filter_by(annee=year + 1).one().annee_code, "EA-1")
@@ -152,13 +155,58 @@ class RequestsFlowTest(unittest.TestCase):
             user = User.query.filter_by(member_id="456789").one()
             user_id = user.id
             self.assertEqual(Membership.query.filter_by(user_id=user_id).count(), 0)
+            self.assertEqual(PendingCardRequest.query.filter_by(user_id=user_id).one().status, "payment_required")
         self.post(self.member, "/api/auth/login", {"identifiant": "456789", "password": "secret-9012"})
-        self.assertEqual(self.post(self.member, "/api/memberships/requests", {"annee": year}).status_code, 202)
+        self.assertEqual(self.post(self.member, "/api/memberships/requests", {"annee": year}).status_code, 409)
         self.assertEqual(self.admin.put(f"/api/admin/users/{user_id}/annees", base_url="https://localhost",
                                         json={"annee": f"{year}-{year + 1}", "prefix": "MI"}).status_code, 200)
         with self.app.app_context():
             self.assertEqual(Membership.query.filter_by(user_id=user_id).one().annee_code, "MI-1")
             self.assertEqual(PendingCardRequest.query.count(), 0)
+
+    def test_free_bac1_and_payment_settings(self):
+        year = current_academic_year()
+        payload = {"nom": "Petit", "prenom": "Camille", "member_id": "345678",
+                   "password": "secret-1234", "password2": "secret-1234", "free_card_requested": True}
+        self.assertEqual(self.post(self.public, "/api/auth/register", payload).status_code, 202)
+        with self.app.app_context():
+            row = PendingRegistration.query.one()
+            self.assertTrue(row.free_card_requested)
+            self.assertEqual(row.card_year, year)
+            request_id = row.id
+        self.post(self.admin, "/api/auth/login", {"identifiant": "999999", "password": "admin-test-password"})
+        self.assertTrue(self.get(self.admin, "/api/admin/requests").json["registrations"][0]["free_card_requested"])
+        self.assertEqual(self.post(self.admin, f"/api/admin/registrations/{request_id}/approve").status_code, 200)
+        with self.app.app_context():
+            self.assertEqual(Membership.query.count(), 0)
+            card = PendingCardRequest.query.one()
+            self.assertTrue(card.free_card)
+            self.assertEqual(card.status, "pending")
+            self.assertEqual(card.annee, year)
+            card_id = card.id
+        self.assertEqual(self.post(self.admin, f"/api/admin/card-requests/{card_id}/payment-received").status_code, 409)
+        self.assertEqual(self.post(self.admin, f"/api/admin/card-requests/{card_id}/reject").status_code, 200)
+        with self.app.app_context():
+            self.assertEqual(Membership.query.count(), 0)
+            self.assertEqual(PendingCardRequest.query.one().status, "rejected")
+
+        valid = {"beneficiary": "Fédé Polytech", "iban": "BE68539007547034", "bic": "", "amount": "12.50", "communication_prefix": "Carte Fédé"}
+        self.assertEqual(self.public.get("/api/card-payment").json["beneficiary"], "")
+        self.assertEqual(self.public.get("/api/admin/card-payment").status_code, 401)
+        self.assertEqual(self.admin.put("/api/admin/card-payment", json={**valid, "iban": "BE00000000000000"}, base_url="https://localhost").status_code, 400)
+        self.assertEqual(self.admin.put("/api/admin/card-payment", json={**valid, "amount": "NaN"}, base_url="https://localhost").status_code, 400)
+        self.assertEqual(self.admin.put("/api/admin/card-payment", json=valid, base_url="https://localhost").status_code, 200)
+        self.assertEqual(self.public.get("/api/card-payment").json["annee"], year)
+        qr = self.post(self.public, "/api/card-payment/qr", {"nom": "Petit", "prenom": "Camille"})
+        self.assertEqual(qr.status_code, 200)
+        self.assertEqual(qr.mimetype, "image/png")
+        self.assertTrue(qr.data.startswith(b"\x89PNG"))
+        with self.app.app_context():
+            payload = epc_payload(db.session.get(CardPaymentSettings, 1), f"PETIT Camille – Carte Fédé {year}-{year + 1}")
+            self.assertEqual(payload.split("\n")[:4], ["BCD", "002", "1", "SCT"])
+            self.assertEqual(payload.split("\n")[7], "EUR12.50")
+            self.assertTrue(payload.endswith(f"PETIT Camille – Carte Fédé {year}-{year + 1}"))
+        self.assertEqual(self.post(self.public, "/api/card-payment/qr", {"nom": "Petit", "prenom": "Camille", "annee": year + 2}).status_code, 400)
 
 
 if __name__ == "__main__":

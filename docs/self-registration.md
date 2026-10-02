@@ -13,17 +13,20 @@ Permettre aux nouveaux utilisateurs de créer eux-mêmes leur compte sur le site
    - matricule UMONS ou adresse email pour une inscription non-UMONS ;
    - mot de passe ;
    - confirmation du mot de passe.
+   - éventuellement la demande de gratuité BAC1 Polytech.
 3. Le backend valide et normalise les données.
 4. La demande est stockée dans `pending_registration` avec le mot de passe hashé. Elle expire après 30 jours et est supprimée lors des accès suivants à l'inscription ou à la file admin.
-5. Aucune carte Fédé n'est attribuée automatiquement lors de l'inscription.
-6. Un administrateur valide ou rejette la demande. La validation crée le compte membre, éventuellement avec une carte attribuée automatiquement dans la même transaction.
-7. Les comptes existants peuvent demander une carte pour l'année actuelle ou suivante ; l'admin valide ou refuse, et l'utilisateur voit l'état de sa demande.
+5. Aucune carte Fédé n'est attribuée automatiquement lors de l'inscription. La page affiche la communication de virement pour l'année académique courante et peut générer un QR EPC v2 si le paiement est configuré.
+6. Un administrateur valide ou rejette le compte. Sa validation crée une demande de carte distincte : `pending` pour la gratuité BAC1, `payment_required` pour une carte payante.
+7. Les comptes existants peuvent demander une carte payante pour l'année actuelle ou suivante. L'admin confirme manuellement le paiement, puis attribue ou refuse la carte. Seule l'attribution crée une carte valide.
 
 ## Déploiement
 
 La base de production n'utilise pas `db.create_all()` automatiquement. Avant de déployer le backend, appliquer `backend/migrations/20261002_pending_requests.sql` à la base PostgreSQL `membres` (par exemple avec `docker compose exec -T db psql -U postgres -d membres < backend/migrations/20261002_pending_requests.sql`). La migration est idempotente. Aucun champ des tables existantes n'est modifié.
 
 Pour accepter les inscriptions non-UMONS sur une base existante, appliquer ensuite `backend/migrations/20261002_non_umons_registration.sql` avant de déployer le nouveau backend. Cette migration conserve les demandes UMONS en attente et garantit qu'une demande utilise soit un matricule, soit un email.
+
+Pour le paiement et les demandes BAC1, appliquer ensuite `backend/migrations/20261002_card_payment.sql` **avant** de déployer le backend. La migration est idempotente. Après déploiement, un administrateur renseigne le bénéficiaire, l'IBAN et le montant sur `/admin/settings` ; aucun QR ni virement vers un compte par défaut n'est proposé tant que ces paramètres manquent.
 
 ## Contraintes techniques
 
@@ -34,6 +37,7 @@ Pour accepter les inscriptions non-UMONS sur une base existante, appliquer ensui
 - Vérifier la confirmation du mot de passe.
 - Appliquer des limites raisonnables à la taille des champs.
 - Nginx limite `/api/auth/register` à 5 requêtes par minute et par adresse IP (rafale de 5).
+- Le QR de paiement est un virement EPC v2 UTF-8 (`BCD/002/1/SCT`) ; il n'exécute aucun paiement. Un administrateur doit contrôler le virement ou l'éligibilité BAC1 avant d'attribuer la carte.
 - Ne pas attribuer de privilèges de membre avant validation du compte : une demande n'est pas un compte et ne peut pas se connecter.
 - Conserver la compatibilité avec les comptes existants.
 
