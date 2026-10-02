@@ -2,7 +2,9 @@ from flask import Blueprint, request, jsonify
 from flask_login import login_required, current_user
 from werkzeug.security import generate_password_hash
 from sqlalchemy.orm import joinedload
-from .models import db, User, Role, Membership, Room, VoteSession, VoteOption, VoteBallot
+from .models import db, User, Role, Membership, PendingRegistration, PendingCardRequest, Room, VoteSession, VoteOption, VoteBallot
+from .routes_memberships import next_available_card_code, ALLOWED_PREFIXES, current_academic_year
+from sqlalchemy.exc import IntegrityError
 from datetime import datetime, timedelta
 import re
 
@@ -39,6 +41,89 @@ def _session_to_dict(session: VoteSession):
         "closed_at": session.closed_at.isoformat() if session.closed_at else None,
         "options": [{"id": o.id, "text": o.text} for o in (session.options or [])],
     }
+
+@bp_admin.get("/api/admin/requests")
+def pending_requests():
+    now = datetime.utcnow()
+    PendingRegistration.query.filter(PendingRegistration.expires_at <= now).delete()
+    db.session.commit()
+    registrations = PendingRegistration.query.order_by(PendingRegistration.created_at.asc()).all()
+    cards = PendingCardRequest.query.filter_by(status="pending").order_by(PendingCardRequest.created_at.asc()).all()
+    return jsonify({
+        "registrations": [{"id": row.id, "nom": row.nom, "prenom": row.prenom,
+                           "member_id": row.member_id, "created_at": row.created_at.isoformat(),
+                           "expires_at": row.expires_at.isoformat()} for row in registrations],
+        "cards": [{"id": row.id, "annee": row.annee, "nom": row.user.nom,
+                   "prenom": row.user.prenom, "identifiant": row.user.member_id or row.user.email,
+                   "created_at": row.created_at.isoformat()} for row in cards],
+    })
+
+
+@bp_admin.post("/api/admin/registrations/<request_id>/<decision>")
+def decide_registration(request_id, decision):
+    if decision not in ("approve", "reject"):
+        return jsonify({"error": "Décision invalide."}), 404
+    row = PendingRegistration.query.filter_by(id=request_id).first()
+    if not row or row.expires_at <= datetime.utcnow():
+        return jsonify({"error": "Demande expirée ou introuvable."}), 404
+    if decision == "reject":
+        db.session.delete(row)
+        db.session.commit()
+        return jsonify({"ok": True})
+    if User.query.filter_by(member_id=row.member_id).first():
+        return jsonify({"error": "Un compte existe déjà avec ce matricule."}), 409
+    data = request.get_json(silent=True) or {}
+    if not isinstance(data, dict):
+        return jsonify({"error": "Données invalides."}), 400
+    add_card = data.get("add_card") is True
+    year = data.get("annee")
+    prefix = str(data.get("prefix") or "A").upper()
+    if add_card and (type(year) is not int or year not in (current_academic_year(), current_academic_year() + 1) or prefix not in ALLOWED_PREFIXES):
+        return jsonify({"error": "Année ou préfixe de carte invalide."}), 400
+    user = User(nom=row.nom, prenom=row.prenom, member_id=row.member_id,
+                password_hash=row.password_hash, role=Role.MEMBER)
+    try:
+        db.session.add(user)
+        db.session.flush()
+        if add_card:
+            db.session.add(Membership(user_id=user.id, annee=year,
+                                      annee_code=next_available_card_code(year, prefix)))
+        db.session.delete(row)
+        db.session.commit()
+    except IntegrityError:
+        db.session.rollback()
+        return jsonify({"error": "Conflit de matricule ou de numéro de carte. Réessayez."}), 409
+    return jsonify({"ok": True, "user_id": user.id})
+
+
+@bp_admin.post("/api/admin/card-requests/<request_id>/<decision>")
+def decide_card_request(request_id, decision):
+    if decision not in ("approve", "reject"):
+        return jsonify({"error": "Décision invalide."}), 404
+    row = PendingCardRequest.query.filter_by(id=request_id, status="pending").first()
+    if not row:
+        return jsonify({"error": "Demande introuvable."}), 404
+    if decision == "reject":
+        row.status = "rejected"
+        db.session.commit()
+        return jsonify({"ok": True})
+    if Membership.query.filter_by(user_id=row.user_id, annee=row.annee).first():
+        return jsonify({"error": "Ce compte possède déjà une carte pour cette année."}), 409
+    data = request.get_json(silent=True) or {}
+    if not isinstance(data, dict):
+        return jsonify({"error": "Données invalides."}), 400
+    prefix = str(data.get("prefix") or "A").upper()
+    if prefix not in ALLOWED_PREFIXES:
+        return jsonify({"error": "Préfixe invalide."}), 400
+    try:
+        db.session.add(Membership(user_id=row.user_id, annee=row.annee,
+                                  annee_code=next_available_card_code(row.annee, prefix)))
+        db.session.delete(row)
+        db.session.commit()
+    except IntegrityError:
+        db.session.rollback()
+        return jsonify({"error": "Conflit de numéro de carte. Réessayez."}), 409
+    return jsonify({"ok": True})
 
 @bp_admin.route("/api/admin/users", methods=["GET", "POST"])
 @login_required

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import UserDetails from "./UserDetails";
+import AdminRequests from "./AdminRequests";
 import {
   filterUsers,
   request,
@@ -188,6 +189,7 @@ export default function AdminUsersTable() {
           </label>
         </div>
       </section>
+      {!loading && !error && <AdminRequests onChanged={() => { setNotice("Demande validée."); void load(); }} />}
       {notice && (
         <p role="status" className="admin-success">
           {notice}

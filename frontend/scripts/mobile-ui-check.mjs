@@ -65,6 +65,8 @@ await page.route("**/api/**", async (route) => {
       status: failLoad ? 503 : 200,
       json: failLoad ? {} : users,
     });
+  if (path === "/api/admin/requests")
+    return route.fulfill({ json: { registrations: [], cards: [] } });
   const match = path.match(/^\/api\/admin\/users\/(\d+)(.*)$/);
   assert.ok(match, `Unexpected endpoint ${path}`);
   const user = users.find((user) => user.id === Number(match[1]));
@@ -88,6 +90,7 @@ await page.route("**/api/**", async (route) => {
         },
       });
     user.cartes[body.annee.split("-")[0]] = body.annee_code;
+    return route.fulfill({ json: { ok: true, annee_code: body.annee_code } });
   } else if (suffix.startsWith("/annees/")) {
     assert.match(suffix, /^\/annees\/\d{4}$/);
     delete user.cartes[suffix.split("/")[2]];

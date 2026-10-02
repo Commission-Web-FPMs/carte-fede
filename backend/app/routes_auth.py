@@ -1,11 +1,13 @@
 from flask import Blueprint, request, jsonify, current_app
 from flask_login import login_user, logout_user, login_required, current_user
-from .models import db, User, Role
+from .models import db, User, Role, PendingRegistration
 from werkzeug.security import generate_password_hash, check_password_hash
 from itsdangerous import BadSignature, SignatureExpired
 from .email_utils import send_email
 from .password_reset import generate_reset_token, verify_reset_token
 from sqlalchemy.exc import IntegrityError
+from datetime import datetime, timedelta
+import re
 
 
 bp_auth = Blueprint("auth", __name__)
@@ -66,54 +68,44 @@ def me():
 def register():
     try:
         data = request.get_json(silent=True) or {}
-        email = (data.get("email") or "").strip().lower()
-        password = (data.get("password") or "")
-        nom = (data.get("nom") or "").strip()
-        prenom = (data.get("prenom") or "").strip()
+        if not isinstance(data, dict) or not all(isinstance(data.get(field), str) for field in ("nom", "prenom", "member_id", "password", "password2")):
+            return jsonify({"error": "Champs d'inscription invalides."}), 400
+        password = data["password"]
+        nom = data["nom"].strip()
+        prenom = data["prenom"].strip()
+        member_id = data["member_id"].strip()
+        if not nom or not prenom or not re.fullmatch(r"[0-9]{6}", member_id):
+            return jsonify({"error": "Nom, prénom et matricule à 6 chiffres requis."}), 400
+        if len(nom) > 100 or len(prenom) > 100 or not 8 <= len(password) <= 128:
+            return jsonify({"error": "Nom/prénom trop long ou mot de passe hors limite (8 à 128 caractères)."}), 400
+        if password != data.get("password2"):
+            return jsonify({"error": "Les mots de passe ne correspondent pas."}), 400
+        if User.query.filter_by(member_id=member_id).first():
+            return jsonify({"error": "Un compte existe déjà avec ce matricule."}), 409
 
-        # Validation minimale
-        if not email or not password or not nom or not prenom:
-            return jsonify({"error": "Tous les champs sont requis"}), 400
-
-        if len(password) < 6:
-            return jsonify({"error": "Le mot de passe doit contenir au moins 6 caractères"}), 400
-
-        # Vérifie que l'email n'est pas déjà utilisé
-        if User.query.filter_by(email=email).first():
-            return jsonify({"error": "Un compte existe déjà avec cet email"}), 400
-
-        # Création de l'utilisateur avec Enum Role
-        user = User(
-            email=email,
+        # Expired rows are discarded on access; no background scheduler is needed.
+        PendingRegistration.query.filter(PendingRegistration.expires_at <= datetime.utcnow()).delete()
+        if PendingRegistration.query.filter_by(member_id=member_id).first():
+            db.session.rollback()
+            return jsonify({"error": "Une inscription est déjà en attente pour ce matricule."}), 409
+        pending = PendingRegistration(
+            member_id=member_id,
             nom=nom,
             prenom=prenom,
             password_hash=generate_password_hash(password),
-            role=Role.MEMBER, 
+            expires_at=datetime.utcnow() + timedelta(days=30),
         )
-
-        db.session.add(user)
+        db.session.add(pending)
         try:
             db.session.commit()
         except IntegrityError:
             db.session.rollback()
-            return jsonify({"error": "Un compte existe déjà avec cet email"}), 400
-
-        # Connecte automatiquement après inscription
-        login_user(user, remember=True)
-
-        return jsonify({
-            "ok": True,
-            "user": {
-                "email": user.email or "",
-                "member_id": user.member_id or "",
-                "nom": user.nom,
-                "prenom": user.prenom,
-                "role": user.role.value  # renvoie "member", "admin", ou "verifier"
-            }
-        })
-    except Exception as e:
+            return jsonify({"error": "Une inscription est déjà en attente pour ce matricule."}), 409
+        return jsonify({"ok": True, "expires_at": pending.expires_at.isoformat()}), 202
+    except Exception:
+        db.session.rollback()
         current_app.logger.exception("Register error")
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "Inscription indisponible. Réessayez plus tard."}), 500
 
 
 @bp_auth.route("/api/auth/change-password", methods=["POST"])

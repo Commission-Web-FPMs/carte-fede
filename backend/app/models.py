@@ -48,6 +48,27 @@ class Membership(db.Model):
         db.UniqueConstraint("annee", "annee_code", name="uq_annee_code_year") # code unique dans une même année
     )
 
+class PendingRegistration(db.Model):
+    __tablename__ = "pending_registration"
+    id = db.Column(db.String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    nom = db.Column(db.String(100), nullable=False)
+    prenom = db.Column(db.String(100), nullable=False)
+    member_id = db.Column(db.String(6), unique=True, nullable=False)
+    password_hash = db.Column(db.String, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    expires_at = db.Column(db.DateTime, nullable=False, index=True)
+
+class PendingCardRequest(db.Model):
+    __tablename__ = "pending_card_request"
+    id = db.Column(db.String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id = db.Column(db.String, db.ForeignKey("user.id", ondelete="CASCADE"), nullable=False)
+    annee = db.Column(db.Integer, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    status = db.Column(db.String(16), nullable=False, default="pending")
+    user = relationship("User")
+
+    __table_args__ = (db.UniqueConstraint("user_id", "annee", name="uq_pending_card_user_year"),)
+
 class Room(db.Model):
     __tablename__ = "room"
     id = db.Column(db.String, primary_key=True, default=lambda: str(uuid.uuid4()))

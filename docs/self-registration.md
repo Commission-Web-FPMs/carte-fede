@@ -4,7 +4,7 @@
 
 Permettre aux nouveaux utilisateurs de créer eux-mêmes leur compte sur le site de la carte Fédé, sans nécessiter la création manuelle du compte par un administrateur.
 
-## Flux envisagé
+## Flux
 
 1. L'utilisateur accède à une page publique `/register/`.
 2. Il renseigne :
@@ -14,31 +14,35 @@ Permettre aux nouveaux utilisateurs de créer eux-mêmes leur compte sur le site
    - mot de passe ;
    - confirmation du mot de passe.
 3. Le backend valide et normalise les données.
-4. Le compte est créé avec le rôle `en attente`.
+4. La demande est stockée dans `pending_registration` avec le mot de passe hashé. Elle expire après 30 jours et est supprimée lors des accès suivants à l'inscription ou à la file admin.
 5. Aucune carte Fédé n'est attribuée automatiquement lors de l'inscription.
-6. Un administrateur vérifie et valide ensuite le compte.
-7. Une carte peut être attribuée via le système d'administration existant.
+6. Un administrateur valide ou rejette la demande. La validation crée le compte membre, éventuellement avec une carte attribuée automatiquement dans la même transaction.
+7. Les comptes existants peuvent demander une carte pour l'année actuelle ou suivante ; l'admin valide ou refuse, et l'utilisateur voit l'état de sa demande.
+
+## Déploiement
+
+La base de production n'utilise pas `db.create_all()` automatiquement. Avant de déployer le backend, appliquer `backend/migrations/20261002_pending_requests.sql` à la base PostgreSQL `membres` (par exemple avec `docker compose exec -T db psql -U postgres -d membres < backend/migrations/20261002_pending_requests.sql`). La migration est idempotente. Aucun champ des tables existantes n'est modifié.
 
 ## Contraintes techniques
 
 - Réutiliser le système existant de hashage des mots de passe.
 - Garantir l'unicité du matricule au niveau de la base de données.
-- Déterminer si le champ `identifiant` existant doit représenter directement le matricule afin d'éviter de dupliquer l'information.
+- Le matricule est stocké dans `member_id` et sert à la connexion ; l'admin vérifie l'identité avant validation.
 - Valider et normaliser les nom, prénom et matricule côté backend.
 - Vérifier la confirmation du mot de passe.
 - Appliquer des limites raisonnables à la taille des champs.
-- Prévoir une protection contre les créations de comptes abusives et les tentatives répétées.
-- Ne pas attribuer de privilèges de membre avant validation du compte.
+- Nginx limite `/api/auth/register` à 5 requêtes par minute et par adresse IP (rafale de 5).
+- Ne pas attribuer de privilèges de membre avant validation du compte : une demande n'est pas un compte et ne peut pas se connecter.
 - Conserver la compatibilité avec les comptes existants.
 
 ## Interface d'administration
 
-L'interface `/admin/users` devra permettre d'identifier facilement les comptes ayant le rôle `en attente`.
+L'interface `/admin/users` affiche les demandes temporaires dans une file dédiée, séparée des comptes existants.
 
 Un administrateur pourra ensuite :
 
 - vérifier les informations de l'utilisateur ;
-- valider son compte en modifiant son rôle ;
+- valider son compte, ce qui crée l'utilisateur membre ;
 - lui attribuer une carte Fédé ;
 - utiliser l'attribution automatique du prochain numéro disponible.
 
@@ -46,8 +50,5 @@ Un administrateur pourra ensuite :
 
 À terme :
 
-- modification du mot de passe ;
-- récupération de mot de passe ;
 - modification contrôlée des informations personnelles ;
-- vue dédiée aux inscriptions en attente ;
 - validation groupée des inscriptions.
