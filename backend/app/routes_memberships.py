@@ -28,7 +28,7 @@ def my_memberships():
 def card_requests():
     if request.method == "GET":
         rows = PendingCardRequest.query.filter_by(user_id=current_user.id).order_by(PendingCardRequest.annee.desc()).all()
-        return jsonify([{"annee": row.annee, "status": row.status} for row in rows])
+        return jsonify([{"annee": row.annee, "status": row.status, "free_card": row.free_card} for row in rows])
 
     data = request.get_json(silent=True) or {}
     if not isinstance(data, dict) or type(data.get("annee")) is not int:
@@ -39,19 +39,20 @@ def card_requests():
     if Membership.query.filter_by(user_id=current_user.id, annee=year).first():
         return jsonify({"error": "Vous possédez déjà une carte pour cette année."}), 409
     row = PendingCardRequest.query.filter_by(user_id=current_user.id, annee=year).first()
-    if row and row.status == "pending":
+    if row and row.status in ("pending", "payment_required"):
         return jsonify({"error": "Une demande est déjà en attente pour cette année."}), 409
     if row:
-        row.status = "pending"
+        row.status = "payment_required"
+        row.free_card = False
         row.created_at = datetime.utcnow()
     else:
-        db.session.add(PendingCardRequest(user_id=current_user.id, annee=year))
+        db.session.add(PendingCardRequest(user_id=current_user.id, annee=year, status="payment_required"))
     try:
         db.session.commit()
     except IntegrityError:
         db.session.rollback()
         return jsonify({"error": "Une demande est déjà en attente pour cette année."}), 409
-    return jsonify({"ok": True, "annee": year, "status": "pending"}), 202
+    return jsonify({"ok": True, "annee": year, "status": "payment_required"}), 202
 
 
 # ---------- Helpers (validation/normalisation) ----------

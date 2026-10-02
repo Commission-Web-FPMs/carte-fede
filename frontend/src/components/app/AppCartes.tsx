@@ -6,7 +6,8 @@ type Membership = {
   annee: number;
   annee_code?: string;
 };
-type CardRequest = { annee: number; status: "pending" | "rejected" };
+type CardRequest = { annee: number; status: "payment_required" | "pending" | "rejected"; free_card?: boolean };
+type Payment = { annee: number; beneficiary: string; iban: string; bic: string; amount: string; communication_prefix: string };
 
 function formatAcademicYear(start: number): string {
   return `${start}-${start + 1}`;
@@ -26,6 +27,10 @@ export default function AppCartes() {
   const [requestMessage, setRequestMessage] = useState("");
   const [requestError, setRequestError] = useState(false);
   const [requestBusy, setRequestBusy] = useState(false);
+  const [payment, setPayment] = useState<Payment | null>(null);
+  const [paymentQr, setPaymentQr] = useState("");
+  const [paymentError, setPaymentError] = useState("");
+  const [accountName, setAccountName] = useState("");
 
   useEffect(() => {
     const load = async () => {
@@ -36,6 +41,8 @@ export default function AppCartes() {
             "/login?next=" + encodeURIComponent(window.location.pathname);
           return;
         }
+        const account = await me.json();
+        setAccountName(`${(account.nom || "NOM").toUpperCase()} ${account.prenom || "Prénom"}`);
 
         await Promise.all([
           request("/api/memberships")
@@ -53,6 +60,10 @@ export default function AppCartes() {
               setRequestError(true);
               setRequestMessage("Impossible de charger vos demandes de carte. Réessayez en rechargeant la page.");
             }),
+          fetch("/api/card-payment", { cache: "no-store" })
+            .then((response) => response.json())
+            .then(setPayment)
+            .catch(() => setPaymentError("Coordonnées de paiement indisponibles.")),
         ]);
       } catch {
         setMemberships([]);
@@ -96,9 +107,9 @@ export default function AppCartes() {
       });
       setRequests((previous) => [
         ...previous.filter((item) => item.annee !== requestYear),
-        { annee: requestYear, status: "pending" },
+        { annee: requestYear, status: "payment_required" },
       ]);
-      setRequestMessage("Demande envoyée : un administrateur doit la valider.");
+      setRequestMessage("Demande envoyée : paiement requis, puis validation par un administrateur.");
     } catch (error) {
       setRequestError(true);
       setRequestMessage(
@@ -108,6 +119,17 @@ export default function AppCartes() {
       );
     } finally {
       setRequestBusy(false);
+    }
+  }
+
+  async function generatePaymentQr() {
+    setPaymentError("");
+    try {
+      const response = await request("/api/card-payment/qr", "POST", { annee: requestYear });
+      if (paymentQr) URL.revokeObjectURL(paymentQr);
+      setPaymentQr(URL.createObjectURL(await response.blob()));
+    } catch (error) {
+      setPaymentError(error instanceof Error ? error.message : "QR de paiement indisponible.");
     }
   }
 
@@ -180,7 +202,11 @@ export default function AppCartes() {
             <select
               className="mt-2 min-h-11 w-full rounded-xl border border-slate-300 bg-white px-3 text-base"
               value={requestYear}
-              onChange={(event) => setRequestYear(Number(event.target.value))}
+              onChange={(event) => {
+                setRequestYear(Number(event.target.value));
+                if (paymentQr) URL.revokeObjectURL(paymentQr);
+                setPaymentQr("");
+              }}
             >
               {[currentYear(), currentYear() + 1].map((year) => (
                 <option value={year} key={year}>
@@ -197,7 +223,7 @@ export default function AppCartes() {
               memberships.some((item) => item.annee === requestYear) ||
               requests.some(
                 (item) =>
-                  item.annee === requestYear && item.status === "pending",
+                  item.annee === requestYear && item.status !== "rejected",
               )
             }
             className="min-h-11 rounded-xl bg-blue-900 px-4 py-2 font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
@@ -215,9 +241,25 @@ export default function AppCartes() {
             {academicYear(String(item.annee))} :{" "}
             {item.status === "pending"
               ? "en attente de validation"
+              : item.status === "payment_required"
+                ? "paiement requis"
               : "demande refusée, vous pouvez en envoyer une nouvelle"}
           </p>
         ))}
+        {requests.some((item) => item.annee === requestYear && item.status === "payment_required") && (
+          <div className="mt-4 rounded-2xl border border-blue-200 bg-blue-50 p-4 text-sm text-slate-700">
+            <p className="font-semibold text-blue-900">Paiement de la carte Fédé</p>
+            <p className="mt-2">Effectuez un virement avec la communication : <strong>{accountName} – {payment?.communication_prefix || "Carte Fédé"} {academicYear(String(requestYear))}</strong>.</p>
+            {payment?.beneficiary && payment?.iban && payment?.amount ? (
+              <>
+                <p className="mt-2 break-words">{payment.beneficiary} · {payment.iban} · {payment.amount} €{payment.bic ? ` · ${payment.bic}` : ""}</p>
+                <button type="button" className="mt-3 min-h-11 rounded-xl bg-blue-900 px-4 py-2 font-semibold text-white" onClick={() => void generatePaymentQr()}>Générer le QR de paiement EPC</button>
+                {paymentQr && <img src={paymentQr} alt="QR de paiement EPC à scanner dans votre application bancaire" className="mt-3 w-56 max-w-full rounded-xl bg-white p-2" />}
+              </>
+            ) : <p className="mt-2">Coordonnées de paiement non encore configurées. Revenez plus tard.</p>}
+            {paymentError && <p role="alert" className="mt-2 text-red-700">{paymentError}</p>}
+          </div>
+        )}
         {requestMessage && (
           <p
             role={requestError ? "alert" : "status"}
@@ -244,7 +286,7 @@ export default function AppCartes() {
                   Période
                 </p>
                 <span className="rounded-full bg-emerald-100 px-3 py-1 text-xs font-bold uppercase tracking-[0.16em] text-emerald-700">
-                  Active
+                  Validée
                 </span>
               </div>
 

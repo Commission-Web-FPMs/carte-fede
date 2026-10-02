@@ -2,7 +2,8 @@ from flask import Blueprint, request, jsonify
 from flask_login import login_required, current_user
 from werkzeug.security import generate_password_hash
 from sqlalchemy.orm import joinedload
-from .models import db, User, Role, Membership, PendingRegistration, PendingCardRequest, Room, VoteSession, VoteOption, VoteBallot
+from .models import db, User, Role, Membership, PendingRegistration, PendingCardRequest, CardPaymentSettings, Room, VoteSession, VoteOption, VoteBallot
+from .card_payment import parse_settings, public_settings, settings
 from .routes_memberships import next_available_card_code, ALLOWED_PREFIXES, current_academic_year
 from sqlalchemy.exc import IntegrityError
 from datetime import datetime, timedelta
@@ -42,20 +43,41 @@ def _session_to_dict(session: VoteSession):
         "options": [{"id": o.id, "text": o.text} for o in (session.options or [])],
     }
 
+@bp_admin.route("/api/admin/card-payment", methods=["GET", "PUT"])
+def card_payment_settings():
+    if request.method == "GET":
+        return jsonify(public_settings())
+    try:
+        beneficiary, iban, bic, amount, prefix = parse_settings(request.get_json(silent=True))
+    except ValueError as error:
+        return jsonify({"error": str(error)}), 400
+    row = settings()
+    if row is None:
+        row = CardPaymentSettings(id=1)
+        db.session.add(row)
+    row.beneficiary = beneficiary
+    row.iban = iban
+    row.bic = bic
+    row.amount = amount
+    row.communication_prefix = prefix
+    db.session.commit()
+    return jsonify(public_settings())
+
 @bp_admin.get("/api/admin/requests")
 def pending_requests():
     now = datetime.utcnow()
     PendingRegistration.query.filter(PendingRegistration.expires_at <= now).delete()
     db.session.commit()
     registrations = PendingRegistration.query.order_by(PendingRegistration.created_at.asc()).all()
-    cards = PendingCardRequest.query.filter_by(status="pending").order_by(PendingCardRequest.created_at.asc()).all()
+    cards = PendingCardRequest.query.filter(PendingCardRequest.status.in_(("pending", "payment_required"))).order_by(PendingCardRequest.created_at.asc()).all()
     return jsonify({
         "registrations": [{"id": row.id, "nom": row.nom, "prenom": row.prenom,
                            "member_id": row.member_id, "email": row.email, "created_at": row.created_at.isoformat(),
-                           "expires_at": row.expires_at.isoformat()} for row in registrations],
+                           "expires_at": row.expires_at.isoformat(), "free_card_requested": row.free_card_requested} for row in registrations],
         "cards": [{"id": row.id, "annee": row.annee, "nom": row.user.nom,
                    "prenom": row.user.prenom, "identifiant": row.user.member_id or row.user.email,
-                   "created_at": row.created_at.isoformat()} for row in cards],
+                   "created_at": row.created_at.isoformat(), "status": row.status,
+                   "free_card": row.free_card} for row in cards],
     })
 
 
@@ -90,6 +112,10 @@ def decide_registration(request_id, decision):
         if add_card:
             db.session.add(Membership(user_id=user.id, annee=year,
                                       annee_code=next_available_card_code(year, prefix)))
+        else:
+            db.session.add(PendingCardRequest(user_id=user.id, annee=row.card_year or current_academic_year(),
+                                              status="pending" if row.free_card_requested else "payment_required",
+                                              free_card=row.free_card_requested))
         db.session.delete(row)
         db.session.commit()
     except IntegrityError:
@@ -100,17 +126,27 @@ def decide_registration(request_id, decision):
 
 @bp_admin.post("/api/admin/card-requests/<request_id>/<decision>")
 def decide_card_request(request_id, decision):
-    if decision not in ("approve", "reject"):
+    if decision not in ("approve", "reject", "payment-received"):
         return jsonify({"error": "Décision invalide."}), 404
-    row = PendingCardRequest.query.filter_by(id=request_id, status="pending").first()
+    row = PendingCardRequest.query.filter_by(id=request_id).first()
     if not row:
         return jsonify({"error": "Demande introuvable."}), 404
+    if decision == "payment-received":
+        if row.status != "payment_required" or row.free_card:
+            return jsonify({"error": "Aucun paiement attendu pour cette demande."}), 409
+        row.status = "pending"
+        db.session.commit()
+        return jsonify({"ok": True})
+    if row.status not in ("pending", "payment_required"):
+        return jsonify({"error": "Demande déjà traitée."}), 409
     if decision == "reject":
         row.status = "rejected"
         db.session.commit()
         return jsonify({"ok": True})
     if Membership.query.filter_by(user_id=row.user_id, annee=row.annee).first():
         return jsonify({"error": "Ce compte possède déjà une carte pour cette année."}), 409
+    if row.status == "payment_required":
+        return jsonify({"error": "Confirmez d'abord la réception du paiement."}), 409
     data = request.get_json(silent=True) or {}
     if not isinstance(data, dict):
         return jsonify({"error": "Données invalides."}), 400

@@ -5,6 +5,7 @@ from werkzeug.security import generate_password_hash, check_password_hash
 from itsdangerous import BadSignature, SignatureExpired
 from .email_utils import send_email
 from .password_reset import generate_reset_token, verify_reset_token
+from .routes_memberships import current_academic_year
 from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from datetime import datetime, timedelta
@@ -61,7 +62,9 @@ def me():
         "member_id": user.member_id or "",  
         "email": user.email or "",
         "role": role_value,
-        "identifiant": identifiant  
+        "identifiant": identifiant,
+        "nom": user.nom,
+        "prenom": user.prenom,
     })
 
 
@@ -86,6 +89,8 @@ def register():
             return jsonify({"error": "Nom/prénom trop long ou mot de passe hors limite (8 à 128 caractères)."}), 400
         if password != data.get("password2"):
             return jsonify({"error": "Les mots de passe ne correspondent pas."}), 400
+        if type(data.get("free_card_requested", False)) is not bool:
+            return jsonify({"error": "Option de carte gratuite invalide."}), 400
         if (member_id and User.query.filter_by(member_id=member_id).first()) or (
             email and User.query.filter(func.lower(User.email) == email).first()
         ):
@@ -105,6 +110,8 @@ def register():
             prenom=prenom,
             password_hash=generate_password_hash(password),
             expires_at=datetime.utcnow() + timedelta(days=30),
+            free_card_requested=data.get("free_card_requested") is True,
+            card_year=current_academic_year(),
         )
         db.session.add(pending)
         try:
@@ -112,7 +119,7 @@ def register():
         except IntegrityError:
             db.session.rollback()
             return jsonify({"error": "Une inscription est déjà en attente pour cet identifiant."}), 409
-        return jsonify({"ok": True, "expires_at": pending.expires_at.isoformat()}), 202
+        return jsonify({"ok": True, "expires_at": pending.expires_at.isoformat(), "card_year": pending.card_year}), 202
     except Exception:
         db.session.rollback()
         current_app.logger.exception("Register error")

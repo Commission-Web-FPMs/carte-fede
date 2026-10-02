@@ -58,6 +58,8 @@ class PendingRegistration(db.Model):
     password_hash = db.Column(db.String, nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
     expires_at = db.Column(db.DateTime, nullable=False, index=True)
+    free_card_requested = db.Column(db.Boolean, nullable=False, default=False)
+    card_year = db.Column(db.Integer, nullable=True)
 
     __table_args__ = (
         db.CheckConstraint("(member_id IS NOT NULL) <> (email IS NOT NULL)", name="pending_registration_one_identifier"),
@@ -70,9 +72,19 @@ class PendingCardRequest(db.Model):
     annee = db.Column(db.Integer, nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
     status = db.Column(db.String(16), nullable=False, default="pending")
+    free_card = db.Column(db.Boolean, nullable=False, default=False)
     user = relationship("User")
 
     __table_args__ = (db.UniqueConstraint("user_id", "annee", name="uq_pending_card_user_year"),)
+
+class CardPaymentSettings(db.Model):
+    __tablename__ = "card_payment_settings"
+    id = db.Column(db.Integer, primary_key=True)
+    beneficiary = db.Column(db.String(70), nullable=False, default="")
+    iban = db.Column(db.String(34), nullable=False, default="")
+    bic = db.Column(db.String(11), nullable=False, default="")
+    amount = db.Column(db.Numeric(10, 2), nullable=True)
+    communication_prefix = db.Column(db.String(60), nullable=False, default="Carte Fédé")
 
 class Room(db.Model):
     __tablename__ = "room"
