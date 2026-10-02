@@ -1,5 +1,6 @@
 // src/components/Nav.tsx
 import { useState, useEffect } from "react";
+import { fetchCurrentUser } from "../lib/current-user";
 import { navItems, type NavItem } from "./NavItems";
 
 type Me = {
@@ -12,7 +13,7 @@ export default function Nav() {
   const [me, setMe] = useState<Me | null>(null);
 
   useEffect(() => {
-    fetch("/api/me", { credentials: "include" })
+    fetchCurrentUser()
       .then(async (res) => {
         if (!res.ok) {
           setRole("guest");

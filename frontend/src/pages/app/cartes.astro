@@ -18,8 +18,10 @@
       <tbody></tbody>
     </table>
     <script>
+      import { fetchCurrentUser } from "../../lib/current-user";
+
       (async () => {
-        const r = await fetch('/api/me', { credentials:'include' });
+        const r = await fetchCurrentUser();
         if (!r.ok) return location.href = '/login?next=' + encodeURIComponent(location.pathname);
 
         const res = await fetch('/api/memberships', { credentials:'include' });

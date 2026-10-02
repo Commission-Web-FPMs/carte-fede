@@ -1,4 +1,4 @@
-const CACHE_VERSION = "carte-fede-v2";
+const CACHE_VERSION = "carte-fede-v3";
 const STATIC_CACHE = `${CACHE_VERSION}-static`;
 const RUNTIME_CACHE = `${CACHE_VERSION}-runtime`;
 
@@ -32,6 +32,19 @@ self.addEventListener("activate", (event) => {
   self.clients.claim();
 });
 
+function fetchAndCache(request, event) {
+  const response = fetch(request);
+  // Persist in the background without delaying delivery or failing on a full cache.
+  event.waitUntil(response.then((result) => {
+    if (result.ok) {
+      const copy = result.clone();
+      return caches.open(RUNTIME_CACHE)
+        .then((cache) => cache.put(request, copy));
+    }
+  }).catch(() => {}));
+  return response;
+}
+
 self.addEventListener("fetch", (event) => {
   const request = event.request;
   const url = new URL(request.url);
@@ -47,12 +60,7 @@ self.addEventListener("fetch", (event) => {
 
   if (request.mode === "navigate") {
     event.respondWith(
-      fetch(request)
-        .then((response) => {
-          const copy = response.clone();
-          caches.open(RUNTIME_CACHE).then((cache) => cache.put(request, copy));
-          return response;
-        })
+      fetchAndCache(request, event)
         .catch(async () => {
           const cached = await caches.match(request);
           return cached || caches.match("/offline.html");
@@ -61,19 +69,12 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  event.respondWith(
-    caches.match(request).then((cached) => {
-      const networkFetch = fetch(request)
-        .then((response) => {
-          if (response.ok) {
-            const copy = response.clone();
-            caches.open(RUNTIME_CACHE).then((cache) => cache.put(request, copy));
-          }
-          return response;
-        })
-        .catch(() => cached);
-
-      return cached || networkFetch;
-    })
-  );
+  const cachedResponse = caches.match(request);
+  const updatedResponse = cachedResponse.then((cached) => {
+    // Astro fingerprints its build assets: their URL changes with their content.
+    if (cached && url.pathname.startsWith("/_astro/")) return cached;
+    return fetchAndCache(request, event).catch(() => cached || Response.error());
+  });
+  event.waitUntil(updatedResponse.then(() => {}));
+  event.respondWith(cachedResponse.then((cached) => cached || updatedResponse));
 });

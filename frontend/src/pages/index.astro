@@ -13,12 +13,16 @@ import statueFPMs from "@images/statue-fpms.jpg";
       class="relative -z-10 h-[calc(100vh_-_15rem)] overflow-hidden rounded-3xl shadow-xl"
     >
       <Image
-        class="-z-10 h-full object-cover"
+        class="-z-10 h-full w-full object-cover"
         src={statueFPMs}
         alt="Statue des deux fondateurs de la Faculté polytechnique de Mons, Guibal et Devillez"
         quality={30}
         width={1920}
         height={1280}
+        widths={[480, 768, 1280, 1920]}
+        sizes="(min-width: 1536px) 1520px, (min-width: 1280px) 1264px, (min-width: 1024px) 1008px, (min-width: 768px) 752px, (min-width: 640px) 624px, calc(100vw - 1rem)"
+        loading="eager"
+        fetchpriority="high"
         format="webp"
       />
       <div class="absolute inset-0 flex items-end pb-16">

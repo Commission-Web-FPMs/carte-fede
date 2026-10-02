@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "react";
+import { fetchCurrentUser } from "../lib/current-user";
 import { navItems as originalNavItems, type NavItem } from "./NavItems";
 
 type Me = {
@@ -28,7 +29,7 @@ export default function Nav() {
   }, [isMenuOpen]);
 
   useEffect(() => {
-    fetch("/api/me", { credentials: "include" })
+    fetchCurrentUser()
       .then(async (res) => {
         if (!res.ok) {
           setRole("guest");

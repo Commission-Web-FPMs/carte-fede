@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { fetchCurrentUser } from "../../lib/current-user";
 
 type Membership = {
   annee: number;
@@ -18,7 +19,7 @@ export default function AppQr() {
   useEffect(() => {
     const load = async () => {
       try {
-        const me = await fetch("/api/me", { credentials: "include" });
+        const me = await fetchCurrentUser();
         if (!me.ok) {
           window.location.href = "/login?next=" + encodeURIComponent(window.location.pathname);
           return;

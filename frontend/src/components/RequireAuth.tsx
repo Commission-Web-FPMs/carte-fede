@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { fetchCurrentUser } from "../lib/current-user";
 
 interface RequireAuthProps {
   children: React.ReactNode;
@@ -19,7 +20,7 @@ export default function RequireAuth({
       console.log("[RequireAuth] Début de la vérification d'authentification");
 
       try {
-        const res = await fetch("/api/me", { credentials: "include" });
+        const res = await fetchCurrentUser();
         console.log("[RequireAuth] Response status:", res.status);
 
         if (!res.ok) {
