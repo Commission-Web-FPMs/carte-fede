@@ -1,8 +1,14 @@
 from flask import Blueprint, jsonify, request
 from flask_login import login_required, current_user
-from .models import db, Membership, User, Role
+from .models import db, Membership, PendingCardRequest, User, Role
+from sqlalchemy.exc import IntegrityError
+from datetime import datetime
 
 bp_mem = Blueprint("memberships", __name__)
+
+def current_academic_year():
+    now = datetime.utcnow()
+    return now.year if now.month >= 8 else now.year - 1
 
 # ---------- Membres : consulter ses cartes ----------
 @bp_mem.route("/api/memberships", methods=["GET"])
@@ -15,6 +21,37 @@ def my_memberships():
         .all()
     )
     return jsonify([{"annee": r.annee, "annee_code": r.annee_code} for r in rows])
+
+
+@bp_mem.route("/api/memberships/requests", methods=["GET", "POST"])
+@login_required
+def card_requests():
+    if request.method == "GET":
+        rows = PendingCardRequest.query.filter_by(user_id=current_user.id).order_by(PendingCardRequest.annee.desc()).all()
+        return jsonify([{"annee": row.annee, "status": row.status} for row in rows])
+
+    data = request.get_json(silent=True) or {}
+    if not isinstance(data, dict) or type(data.get("annee")) is not int:
+        return jsonify({"error": "Année invalide."}), 400
+    year = data["annee"]
+    if year not in (current_academic_year(), current_academic_year() + 1):
+        return jsonify({"error": "Choisissez l'année académique actuelle ou la suivante."}), 400
+    if Membership.query.filter_by(user_id=current_user.id, annee=year).first():
+        return jsonify({"error": "Vous possédez déjà une carte pour cette année."}), 409
+    row = PendingCardRequest.query.filter_by(user_id=current_user.id, annee=year).first()
+    if row and row.status == "pending":
+        return jsonify({"error": "Une demande est déjà en attente pour cette année."}), 409
+    if row:
+        row.status = "pending"
+        row.created_at = datetime.utcnow()
+    else:
+        db.session.add(PendingCardRequest(user_id=current_user.id, annee=year))
+    try:
+        db.session.commit()
+    except IntegrityError:
+        db.session.rollback()
+        return jsonify({"error": "Une demande est déjà en attente pour cette année."}), 409
+    return jsonify({"ok": True, "annee": year, "status": "pending"}), 202
 
 
 # ---------- Helpers (validation/normalisation) ----------
@@ -134,6 +171,7 @@ def upsert_or_list_year(user_id):
         row = Membership(user_id=u.id, annee=annee_start, annee_code=code)
         db.session.add(row)
 
+    PendingCardRequest.query.filter_by(user_id=u.id, annee=annee_start).delete()
     db.session.commit()
     return jsonify({"ok": True, "id": row.id, "annee": row.annee, "annee_code": row.annee_code})
 

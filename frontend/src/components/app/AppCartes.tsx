@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
+import { academicYear, currentYear, request } from "../../lib/admin-users";
 
 type Membership = {
   annee: number;
   annee_code?: string;
 };
+type CardRequest = { annee: number; status: "pending" | "rejected" };
 
 function formatAcademicYear(start: number): string {
   return `${start}-${start + 1}`;
@@ -18,13 +20,19 @@ export default function AppCartes() {
   const [loading, setLoading] = useState(true);
   const [memberships, setMemberships] = useState<Membership[]>([]);
   const [copyMessage, setCopyMessage] = useState<string>("");
+  const [requests, setRequests] = useState<CardRequest[]>([]);
+  const [requestYear, setRequestYear] = useState(currentYear());
+  const [requestMessage, setRequestMessage] = useState("");
+  const [requestError, setRequestError] = useState(false);
+  const [requestBusy, setRequestBusy] = useState(false);
 
   useEffect(() => {
     const load = async () => {
       try {
         const me = await fetch("/api/me", { credentials: "include" });
         if (!me.ok) {
-          window.location.href = "/login?next=" + encodeURIComponent(window.location.pathname);
+          window.location.href =
+            "/login?next=" + encodeURIComponent(window.location.pathname);
           return;
         }
 
@@ -38,6 +46,10 @@ export default function AppCartes() {
         const list = Array.isArray(data) ? data : [];
         list.sort((a: Membership, b: Membership) => b.annee - a.annee);
         setMemberships(list);
+        const pending = await fetch("/api/memberships/requests", {
+          credentials: "include",
+        });
+        if (pending.ok) setRequests(await pending.json());
       } catch {
         setMemberships([]);
       } finally {
@@ -69,8 +81,38 @@ export default function AppCartes() {
     window.setTimeout(() => setCopyMessage(""), 2200);
   };
 
+  async function askForCard() {
+    if (requestBusy) return;
+    setRequestBusy(true);
+    setRequestMessage("");
+    setRequestError(false);
+    try {
+      await request("/api/memberships/requests", "POST", {
+        annee: requestYear,
+      });
+      setRequests((previous) => [
+        ...previous.filter((item) => item.annee !== requestYear),
+        { annee: requestYear, status: "pending" },
+      ]);
+      setRequestMessage("Demande envoyée : un administrateur doit la valider.");
+    } catch (error) {
+      setRequestError(true);
+      setRequestMessage(
+        error instanceof Error
+          ? error.message
+          : "Demande impossible. Réessayez.",
+      );
+    } finally {
+      setRequestBusy(false);
+    }
+  }
+
   if (loading) {
-    return <p className="mx-auto max-w-5xl p-8 text-slate-500">Chargement des cartes...</p>;
+    return (
+      <p className="mx-auto max-w-5xl p-8 text-slate-500">
+        Chargement des cartes...
+      </p>
+    );
   }
 
   return (
@@ -78,10 +120,13 @@ export default function AppCartes() {
       <header className="rounded-3xl border border-slate-200 bg-white/90 p-5 shadow-sm sm:p-8">
         <div className="grid gap-5 md:grid-cols-[1fr_auto] md:items-start">
           <div>
-            <h1 className="text-4xl font-black tracking-tight text-slate-900">Mes cartes</h1>
+            <h1 className="text-4xl font-black tracking-tight text-slate-900">
+              Mes cartes
+            </h1>
             <p className="mt-2 max-w-xl text-base leading-relaxed text-slate-500">
-              Retrouvez ici l&apos;ensemble de vos cartes d&apos;adhésion actives. Présentez l&apos;identifiant pour prouver
-              votre statut lors des événements et contrôles.
+              Retrouvez ici l&apos;ensemble de vos cartes d&apos;adhésion
+              actives. Présentez l&apos;identifiant pour prouver votre statut
+              lors des événements et contrôles.
             </p>
           </div>
           <a
@@ -94,15 +139,90 @@ export default function AppCartes() {
 
         <div className="mt-6 grid gap-4 sm:grid-cols-2">
           <div className="rounded-2xl border border-slate-200 bg-slate-50/70 px-4 py-3">
-            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-blue-500">Cartes actives</p>
-            <p className="mt-1 text-4xl font-black text-slate-900">{memberships.length}</p>
+            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-blue-500">
+              Cartes actives
+            </p>
+            <p className="mt-1 text-4xl font-black text-slate-900">
+              {memberships.length}
+            </p>
           </div>
           <div className="rounded-2xl border border-slate-200 bg-slate-50/70 px-4 py-3">
-            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-blue-500">Dernière mise à jour</p>
-            <p className="mt-1 text-3xl font-black text-slate-900">{updatedLabel}</p>
+            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-blue-500">
+              Dernière mise à jour
+            </p>
+            <p className="mt-1 text-3xl font-black text-slate-900">
+              {updatedLabel}
+            </p>
           </div>
         </div>
       </header>
+
+      <section
+        className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6"
+        aria-labelledby="card-request-title"
+      >
+        <h2
+          id="card-request-title"
+          className="text-xl font-semibold text-blue-900"
+        >
+          Demander une carte Fédé
+        </h2>
+        <p className="mt-1 text-sm text-slate-600">
+          Votre carte sera créée après validation par un administrateur.
+        </p>
+        <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-end">
+          <label className="block flex-1 text-sm font-medium text-slate-700">
+            Année académique
+            <select
+              className="mt-2 min-h-11 w-full rounded-xl border border-slate-300 bg-white px-3 text-base"
+              value={requestYear}
+              onChange={(event) => setRequestYear(Number(event.target.value))}
+            >
+              {[currentYear(), currentYear() + 1].map((year) => (
+                <option value={year} key={year}>
+                  {academicYear(String(year))}
+                </option>
+              ))}
+            </select>
+          </label>
+          <button
+            type="button"
+            onClick={() => void askForCard()}
+            disabled={
+              requestBusy ||
+              memberships.some((item) => item.annee === requestYear) ||
+              requests.some(
+                (item) =>
+                  item.annee === requestYear && item.status === "pending",
+              )
+            }
+            className="min-h-11 rounded-xl bg-blue-900 px-4 py-2 font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {requestBusy ? "Envoi…" : "Demander cette carte"}
+          </button>
+        </div>
+        {memberships.some((item) => item.annee === requestYear) && (
+          <p className="mt-2 text-sm text-slate-600">
+            Vous possédez déjà une carte pour cette année.
+          </p>
+        )}
+        {requests.map((item) => (
+          <p className="mt-2 text-sm text-slate-700" key={item.annee}>
+            {academicYear(String(item.annee))} :{" "}
+            {item.status === "pending"
+              ? "en attente de validation"
+              : "demande refusée, vous pouvez en envoyer une nouvelle"}
+          </p>
+        ))}
+        {requestMessage && (
+          <p
+            role={requestError ? "alert" : "status"}
+            className={`mt-3 rounded-xl p-3 text-sm ${requestError ? "bg-red-50 text-red-800" : "bg-blue-50 text-blue-900"}`}
+          >
+            {requestMessage}
+          </p>
+        )}
+      </section>
 
       {!memberships.length ? (
         <article className="rounded-3xl border border-slate-200 bg-white p-8 text-slate-500 shadow-sm">
@@ -111,17 +231,26 @@ export default function AppCartes() {
       ) : (
         <div className="grid gap-4 md:grid-cols-2">
           {memberships.map((item) => (
-            <article key={item.annee} className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
+            <article
+              key={item.annee}
+              className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6"
+            >
               <div className="flex items-center justify-between gap-3">
-                <p className="text-xs font-semibold uppercase tracking-[0.24em] text-blue-500">Période</p>
+                <p className="text-xs font-semibold uppercase tracking-[0.24em] text-blue-500">
+                  Période
+                </p>
                 <span className="rounded-full bg-emerald-100 px-3 py-1 text-xs font-bold uppercase tracking-[0.16em] text-emerald-700">
                   Active
                 </span>
               </div>
 
-              <h2 className="mt-1 text-3xl font-black text-slate-900">{formatAcademicYear(item.annee)}</h2>
+              <h2 className="mt-1 text-3xl font-black text-slate-900">
+                {formatAcademicYear(item.annee)}
+              </h2>
 
-              <p className="mt-6 text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">Identifiant</p>
+              <p className="mt-6 text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">
+                Identifiant
+              </p>
               <div className="mt-2 rounded-xl bg-slate-100 px-4 py-3 text-2xl font-extrabold tracking-wide text-slate-700">
                 {padCode(item.annee_code)}
               </div>
@@ -139,7 +268,9 @@ export default function AppCartes() {
       )}
 
       {copyMessage ? (
-        <p className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm font-medium text-emerald-700">{copyMessage}</p>
+        <p className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm font-medium text-emerald-700">
+          {copyMessage}
+        </p>
       ) : null}
     </section>
   );

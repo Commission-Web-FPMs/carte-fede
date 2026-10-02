@@ -1,239 +1,154 @@
 ---
 import Layout from "@layouts/Layout.astro";
 ---
+
 <Layout title="Inscription">
-  <main class="flex-1 flex flex-col gap-4 items-center p-4 justify-center">
-    <section class="w-full max-w-md">
-      <h1 class="font-semibold text-2xl text-blue-800 bg-white mb-1">Créer un compte</h1>
-
-      <form id="signupForm" class="stack" novalidate>
-        <label>
-          Nom
+  <main
+    class="min-h-[calc(100dvh-8rem)] bg-gradient-to-b from-slate-50 to-blue-50/40 px-4 py-8"
+  >
+    <section
+      class="mx-auto max-w-lg rounded-3xl border border-slate-200 bg-white p-5 shadow-sm sm:p-8"
+    >
+      <p class="text-xs font-semibold uppercase tracking-widest text-blue-700">
+        Carte Fédé
+      </p>
+      <h1 class="mt-2 text-2xl font-semibold text-blue-900">
+        Demander la création d’un compte
+      </h1>
+      <p class="mt-2 text-sm text-slate-600">
+        Votre compte sera disponible après validation par un administrateur. La
+        demande reste valable 30 jours.
+      </p>
+      <form id="signupForm" class="mt-6 grid gap-4">
+        <label class="block text-sm font-medium text-slate-700"
+          >Nom
           <input
-            id="nom"
             name="nom"
-            type="text"
-            placeholder="Votre nom"
+            autocomplete="family-name"
+            maxlength="100"
             required
-            class="border border-gray-300 rounded-lg p-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            class="mt-2 min-h-11 w-full rounded-xl border border-slate-300 px-3 text-base focus-visible:outline-blue-600"
           />
         </label>
-
-        <label>
-          Prénom
+        <label class="block text-sm font-medium text-slate-700"
+          >Prénom
           <input
-            id="prenom"
             name="prenom"
-            type="text"
-            placeholder="Votre prénom"
+            autocomplete="given-name"
+            maxlength="100"
             required
-            class="border border-gray-300 rounded-lg p-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            class="mt-2 min-h-11 w-full rounded-xl border border-slate-300 px-3 text-base focus-visible:outline-blue-600"
           />
         </label>
-
-        <label>
-          Email UMONS
+        <label class="block text-sm font-medium text-slate-700"
+          >Matricule UMONS (6 chiffres)
           <input
-            id="email"
-            name="email"
-            type="email"
-            placeholder=""
+            name="member_id"
+            inputmode="numeric"
+            pattern="[0-9]{6}"
+            minlength="6"
+            maxlength="6"
             autocomplete="username"
             required
-            class="border border-gray-300 rounded-lg p-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            class="mt-2 min-h-11 w-full rounded-xl border border-slate-300 px-3 text-base focus-visible:outline-blue-600"
           />
         </label>
-
-        <label>
-          Mot de passe
-          <div class="password-field">
-            <input
-              id="password"
-              name="password"
-              type="password"
-              placeholder="••••••••"
-              autocomplete="new-password"
-              required
-              class="password-input border border-gray-300 rounded-lg p-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
-            <button
-              type="button"
-              class="password-toggle"
-              data-password-toggle
-              aria-label="Afficher le mot de passe"
-              aria-pressed="false"
-            >
-              <svg class="icon-show" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
-                <path
-                  d="M1.5 12s3.5-6 10.5-6 10.5 6 10.5 6-3.5 6-10.5 6S1.5 12 1.5 12Z"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="1.8"
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                ></path>
-                <circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="1.8"></circle>
-              </svg>
-              <svg class="icon-hide" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
-                <path
-                  d="M3 3l18 18"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="1.8"
-                  stroke-linecap="round"
-                ></path>
-                <path
-                  d="M10.6 6.3A11.3 11.3 0 0 1 12 6c7 0 10.5 6 10.5 6a18.5 18.5 0 0 1-3.2 3.8M6.7 6.7C3.5 8.7 1.5 12 1.5 12s3.5 6 10.5 6c1.8 0 3.4-.4 4.8-1"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="1.8"
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                ></path>
-              </svg>
-            </button>
-          </div>
+        <label class="block text-sm font-medium text-slate-700"
+          >Mot de passe (8 caractères minimum)
+          <input
+            name="password"
+            type="password"
+            minlength="8"
+            maxlength="128"
+            autocomplete="new-password"
+            required
+            class="mt-2 min-h-11 w-full rounded-xl border border-slate-300 px-3 text-base focus-visible:outline-blue-600"
+          />
         </label>
-
-        <label>
-          Confirmer le mot de passe
-          <div class="password-field">
-            <input
-              id="password2"
-              name="password2"
-              type="password"
-              placeholder="••••••••"
-              autocomplete="new-password"
-              required
-              class="password-input border border-gray-300 rounded-lg p-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
-            <button
-              type="button"
-              class="password-toggle"
-              data-password-toggle
-              aria-label="Afficher le mot de passe"
-              aria-pressed="false"
-            >
-              <svg class="icon-show" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
-                <path
-                  d="M1.5 12s3.5-6 10.5-6 10.5 6 10.5 6-3.5 6-10.5 6S1.5 12 1.5 12Z"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="1.8"
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                ></path>
-                <circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="1.8"></circle>
-              </svg>
-              <svg class="icon-hide" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
-                <path
-                  d="M3 3l18 18"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="1.8"
-                  stroke-linecap="round"
-                ></path>
-                <path
-                  d="M10.6 6.3A11.3 11.3 0 0 1 12 6c7 0 10.5 6 10.5 6a18.5 18.5 0 0 1-3.2 3.8M6.7 6.7C3.5 8.7 1.5 12 1.5 12s3.5 6 10.5 6c1.8 0 3.4-.4 4.8-1"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="1.8"
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                ></path>
-              </svg>
-            </button>
-          </div>
+        <label class="block text-sm font-medium text-slate-700"
+          >Confirmer le mot de passe
+          <input
+            name="password2"
+            type="password"
+            minlength="8"
+            maxlength="128"
+            autocomplete="new-password"
+            required
+            class="mt-2 min-h-11 w-full rounded-xl border border-slate-300 px-3 text-base focus-visible:outline-blue-600"
+          />
         </label>
-
         <button
-          type="submit"
-          class="rounded-lg border-2 border-blue-900 bg-blue-900 px-4 py-2 text-white transition duration-150 hover:bg-blue-50 hover:text-blue-900"
+          id="submitRegistration"
+          class="min-h-11 rounded-xl bg-blue-900 px-4 py-2 font-semibold text-white hover:bg-blue-800 disabled:opacity-60"
+          >Envoyer ma demande</button
         >
-          S'inscrire
-        </button>
-        <p id="err" style="color:#b00;"></p>
       </form>
-
-      <style>
-        .stack {
-          display: flex;
-          flex-direction: column;
-          gap: 0.8rem;
-          max-width: 380px;
-        }
-        input,
-        button {
-          padding: 0.55rem 0.7rem;
-          font-size: 1rem;
-        }
-      </style>
+      <p
+        id="registrationMessage"
+        role="status"
+        aria-live="polite"
+        class="mt-4 text-sm"
+      >
+      </p>
+      <p class="mt-5 text-sm text-slate-600">
+        Déjà inscrit ? <a
+          href="/login"
+          class="font-semibold text-blue-900 underline">Se connecter</a>
+      </p>
     </section>
   </main>
 </Layout>
 
 <script>
-  async function guard() {
-    const r = await fetch('/api/me', { credentials: 'include' });
-    if (!r.ok) return location.href = '/login?next=' + encodeURIComponent(location.pathname);
-    const me = await r.json();
-    if (me.role !== 'admin') return location.href = '/';
-    const who = document.getElementById('who');
-    if (who) {
-      who.textContent = `Connecté : ${me.email} (${me.role})`;
-    }
-  }
-  guard();
-
-  const form = document.getElementById('signupForm') as HTMLFormElement | null;
-  const $err = document.getElementById('err') as HTMLParagraphElement | null;
-  const nomInput = document.getElementById('nom') as HTMLInputElement | null;
-  const prenomInput = document.getElementById('prenom') as HTMLInputElement | null;
-  const emailInput = document.getElementById('email') as HTMLInputElement | null;
-  const passwordInput = document.getElementById('password') as HTMLInputElement | null;
-  const password2Input = document.getElementById('password2') as HTMLInputElement | null;
-
-  form?.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    if (!$err || !nomInput || !prenomInput || !emailInput || !passwordInput || !password2Input) return;
-
-    $err.textContent = '';
-
-    const nom = nomInput.value.trim();
-    const prenom = prenomInput.value.trim();
-    const email = emailInput.value.trim();
-    const password = passwordInput.value;
-    const password2 = password2Input.value;
-
-    if (!nom || !prenom || !email || !password || !password2) {
-      $err.textContent = "Tous les champs sont obligatoires.";
-      return;
-    }
-
-    if (password !== password2) {
-      $err.textContent = "Les mots de passe ne correspondent pas.";
-      return;
-    }
-
-    const res = await fetch('/api/auth/register', {
-      method: 'POST',
-      headers: {'Content-Type':'application/json'},
-      credentials: 'include',
-      body: JSON.stringify({ nom, prenom, email: email.toLowerCase(), password })
-    });
-
-    if (!res.ok) {
-      try {
-        const j = await res.json();
-        $err.textContent = j.error || ('Erreur ' + res.status);
-      } catch {
-        $err.textContent = 'Erreur ' + res.status;
+  document
+    .getElementById("signupForm")
+    ?.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      if (!(event.currentTarget instanceof HTMLFormElement)) return;
+      const form = event.currentTarget;
+      const message = document.getElementById("registrationMessage");
+      const button = document.getElementById(
+        "submitRegistration",
+      ) as HTMLButtonElement | null;
+      if (!message || !button) return;
+      const values = Object.fromEntries(new FormData(form).entries());
+      if (values.password !== values.password2) {
+        message.textContent = "Les mots de passe ne correspondent pas.";
+        message.className = "mt-4 text-sm text-red-700";
+        return;
       }
-      return;
-    }
-
-    // OK → redirige
-    const next = new URLSearchParams(window.location.search).get('next') || '/';
-    location.href = next;
-  });
+      button.disabled = true;
+      button.textContent = "Envoi…";
+      message.textContent = "";
+      try {
+        const response = await fetch("/api/auth/register", {
+          method: "POST",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(values),
+        });
+        const result = await response.json().catch(() => ({}));
+        if (!response.ok)
+          throw new Error(
+            response.status === 429
+              ? "Trop de demandes. Réessayez dans quelques minutes."
+              : result.error || "La demande n’a pas pu être envoyée.",
+          );
+        form.reset();
+        form.style.display = "none";
+        message.textContent =
+          "Demande envoyée. Un administrateur doit la valider avant votre première connexion.";
+        message.className =
+          "mt-4 rounded-xl bg-emerald-50 p-3 text-sm text-emerald-800";
+      } catch (error) {
+        message.textContent =
+          error instanceof Error
+            ? error.message
+            : "Connexion impossible. Réessayez.";
+        message.className =
+          "mt-4 rounded-xl bg-red-50 p-3 text-sm text-red-800";
+        button.disabled = false;
+        button.textContent = "Envoyer ma demande";
+      }
+    });
 </script>
