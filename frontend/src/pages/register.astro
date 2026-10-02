@@ -40,19 +40,39 @@ import Layout from "@layouts/Layout.astro";
             class="mt-2 min-h-11 w-full rounded-xl border border-slate-300 px-3 text-base focus-visible:outline-blue-600"
           />
         </label>
-        <label class="block text-sm font-medium text-slate-700"
-          >Matricule UMONS (6 chiffres)
-          <input
-            name="member_id"
-            inputmode="numeric"
-            pattern="[0-9]{6}"
-            minlength="6"
-            maxlength="6"
-            autocomplete="username"
-            required
-            class="mt-2 min-h-11 w-full rounded-xl border border-slate-300 px-3 text-base focus-visible:outline-blue-600"
-          />
+        <label class="flex min-h-11 items-center gap-3 text-sm font-medium text-slate-700">
+          <input id="nonUmons" type="checkbox" class="size-5 accent-blue-900" />
+          Inscription non-UMONS
         </label>
+        <div id="umonsIdentifier">
+          <label class="block text-sm font-medium text-slate-700"
+            >Matricule UMONS (6 chiffres)
+            <input
+              name="member_id"
+              inputmode="numeric"
+              pattern="[0-9]{6}"
+              minlength="6"
+              maxlength="6"
+              autocomplete="username"
+              required
+              class="mt-2 min-h-11 w-full rounded-xl border border-slate-300 px-3 text-base focus-visible:outline-blue-600"
+            />
+          </label>
+        </div>
+        <div id="emailIdentifier" hidden>
+          <label class="block text-sm font-medium text-slate-700"
+            >Adresse email
+            <input
+              name="email"
+              type="email"
+              inputmode="email"
+              autocomplete="email"
+              maxlength="254"
+              disabled
+              class="mt-2 min-h-11 w-full rounded-xl border border-slate-300 px-3 text-base focus-visible:outline-blue-600"
+            />
+          </label>
+        </div>
         <label class="block text-sm font-medium text-slate-700"
           >Mot de passe (8 caractères minimum)
           <input
@@ -100,6 +120,24 @@ import Layout from "@layouts/Layout.astro";
 </Layout>
 
 <script>
+  const nonUmons = document.getElementById("nonUmons") as HTMLInputElement | null;
+  const memberGroup = document.getElementById("umonsIdentifier");
+  const emailGroup = document.getElementById("emailIdentifier");
+  const memberInput = document.querySelector<HTMLInputElement>('#signupForm [name="member_id"]');
+  const emailInput = document.querySelector<HTMLInputElement>('#signupForm [name="email"]');
+  function updateIdentifier() {
+    if (!nonUmons || !memberGroup || !emailGroup || !memberInput || !emailInput) return;
+    const useEmail = nonUmons.checked;
+    memberGroup.hidden = useEmail;
+    emailGroup.hidden = !useEmail;
+    memberInput.disabled = useEmail;
+    memberInput.required = !useEmail;
+    emailInput.disabled = !useEmail;
+    emailInput.required = useEmail;
+  }
+  nonUmons?.addEventListener("change", updateIdentifier);
+  updateIdentifier();
+
   document
     .getElementById("signupForm")
     ?.addEventListener("submit", async (event) => {

@@ -10,7 +10,8 @@ type Registration = {
   id: string;
   nom: string;
   prenom: string;
-  member_id: string;
+  member_id: string | null;
+  email: string | null;
   expires_at: string;
 };
 type CardRequest = {
@@ -141,8 +142,8 @@ export default function AdminRequests({
                   <p className="font-semibold text-slate-900">
                     {item.prenom} {item.nom}
                   </p>
-                  <p className="text-sm text-slate-600">
-                    Matricule {item.member_id} · valable jusqu’au{" "}
+                  <p className="break-all text-sm text-slate-600">
+                    {item.member_id ? `Matricule ${item.member_id}` : `Email ${item.email}`} · valable jusqu’au{" "}
                     {new Date(`${item.expires_at}Z`).toLocaleDateString(
                       "fr-BE",
                     )}

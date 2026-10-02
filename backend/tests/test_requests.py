@@ -50,6 +50,7 @@ class RequestsFlowTest(unittest.TestCase):
         self.assertEqual(self.post(self.public, "/api/auth/register", {**pending, "password2": "wrong"}).status_code, 400)
         self.assertEqual(self.post(self.public, "/api/auth/register", pending).status_code, 202)
         self.assertEqual(self.post(self.public, "/api/auth/register", pending).status_code, 409)
+
         self.assertEqual(self.post(self.member, "/api/auth/login", {"identifiant": "123456", "password": "secret-1234"}).status_code, 401)
         with self.app.app_context():
             self.assertIsNone(User.query.filter_by(member_id="123456").first())
@@ -85,6 +86,38 @@ class RequestsFlowTest(unittest.TestCase):
             self.assertEqual(Membership.query.filter_by(annee=year + 1).one().annee_code, "EA-1")
             self.assertEqual(PendingCardRequest.query.count(), 0)
         self.assertEqual(self.post(self.public, "/api/auth/register", pending).status_code, 409)
+
+    def test_non_umons_registration_with_email(self):
+        year = current_academic_year()
+        payload = {"nom": "Bernard", "prenom": "Alice", "email": " Alice@Example.org ",
+                   "password": "secret-1234", "password2": "secret-1234"}
+        self.assertEqual(self.post(self.public, "/api/auth/register", {**payload, "email": "alice@"}).status_code, 400)
+        self.assertEqual(self.post(self.public, "/api/auth/register", {**payload, "member_id": "123456"}).status_code, 400)
+        self.assertEqual(self.post(self.public, "/api/auth/register", {**payload, "email": None}).status_code, 400)
+        with self.app.app_context():
+            db.session.add(User(email="Existing@Example.org", nom="Existing", prenom="Test",
+                                password_hash=generate_password_hash("secret-1234")))
+            db.session.commit()
+        self.assertEqual(self.post(self.public, "/api/auth/register", {**payload, "email": "existing@example.org"}).status_code, 409)
+        self.assertEqual(self.post(self.public, "/api/auth/register", payload).status_code, 202)
+        self.assertEqual(self.post(self.public, "/api/auth/register", {**payload, "email": "ALICE@example.org"}).status_code, 409)
+        self.assertEqual(self.post(self.member, "/api/auth/login", {"email": "alice@example.org", "password": "secret-1234"}).status_code, 401)
+        with self.app.app_context():
+            row = PendingRegistration.query.filter_by(email="alice@example.org").one()
+            self.assertIsNone(row.member_id)
+            self.assertTrue(check_password_hash(row.password_hash, "secret-1234"))
+            request_id = row.id
+        self.assertEqual(self.post(self.admin, "/api/auth/login", {"identifiant": "999999", "password": "admin-test-password"}).status_code, 200)
+        registration = self.get(self.admin, "/api/admin/requests").json["registrations"][0]
+        self.assertIsNone(registration["member_id"])
+        self.assertEqual(registration["email"], "alice@example.org")
+        self.assertEqual(self.post(self.admin, f"/api/admin/registrations/{request_id}/approve",
+                                   {"add_card": True, "annee": year, "prefix": "E"}).status_code, 200)
+        with self.app.app_context():
+            user = User.query.filter_by(email="alice@example.org").one()
+            self.assertIsNone(user.member_id)
+            self.assertEqual(Membership.query.filter_by(user_id=user.id, annee=year).one().annee_code, "E-1")
+        self.assertEqual(self.post(self.member, "/api/auth/login", {"email": "ALICE@example.org", "password": "secret-1234"}).status_code, 200)
 
     def test_expiry_and_rejection(self):
         payload = {"nom": "Martin", "prenom": "Anne", "member_id": "654321",

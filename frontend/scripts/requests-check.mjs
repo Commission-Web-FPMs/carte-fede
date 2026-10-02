@@ -31,10 +31,29 @@ try {
   assert.equal(registration.member_id, "123456");
   assert.equal(await register.locator("#signupForm").isVisible(), false);
 
+  registration = null;
+  await register.reload();
+  await register.getByLabel("Inscription non-UMONS").check();
+  assert.ok(await register.getByLabel("Adresse email").isVisible());
+  assert.equal(await register.getByLabel("Matricule UMONS (6 chiffres)").isVisible(), false);
+  await register.getByLabel("Nom", { exact: true }).fill("Bernard");
+  await register.getByLabel("Prénom", { exact: true }).fill("Alice");
+  await register.getByLabel("Adresse email").fill("alice@example.org");
+  await register.getByLabel("Mot de passe (8 caractères minimum)").fill("secret-1234");
+  await register.getByLabel("Confirmer le mot de passe").fill("secret-1234");
+  await register.getByRole("button", { name: "Envoyer ma demande" }).click();
+  await register.getByText("Demande envoyée. Un administrateur doit la valider avant votre première connexion.").waitFor();
+  assert.equal(registration.email, "alice@example.org");
+  assert.equal("member_id" in registration, false);
+  assert.ok(await register.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
+
   const admin = await browser.newPage({ viewport: { width: 390, height: 800 }, serviceWorkers: "block" });
   admin.on("pageerror", error => errors.push(error.message));
   const decisions = [];
-  const queue = { registrations: [{ id: "r1", nom: "Dupont", prenom: "Élodie", member_id: "123456", expires_at: "2026-10-30T00:00:00" }],
+  const queue = { registrations: [
+    { id: "r1", nom: "Dupont", prenom: "Élodie", member_id: "123456", email: null, expires_at: "2026-10-30T00:00:00" },
+    { id: "r2", nom: "Bernard", prenom: "Alice", member_id: null, email: "alice@example.org", expires_at: "2026-10-30T00:00:00" },
+  ],
     cards: [{ id: "c1", nom: "Martin", prenom: "Anne", identifiant: "654321", annee: year }] };
   await admin.route("**/api/**", route => {
     const url = new URL(route.request().url()).pathname;
@@ -43,7 +62,7 @@ try {
     if (url === "/api/admin/requests") return route.fulfill({ json: queue });
     if (url.startsWith("/api/admin/registrations/") || url.startsWith("/api/admin/card-requests/")) {
       decisions.push({ url, body: route.request().postDataJSON() });
-      if (url.includes("/registrations/")) queue.registrations = [];
+      if (url.includes("/registrations/")) queue.registrations = queue.registrations.filter(item => item.id !== url.split("/").at(-2));
       else queue.cards = [];
       return route.fulfill({ json: { ok: true } });
     }
@@ -51,16 +70,21 @@ try {
   });
   await admin.goto(`${base}/admin/users/`);
   await admin.getByRole("heading", { name: "Demandes à valider" }).waitFor();
+  await admin.getByText("Email alice@example.org", { exact: false }).waitFor();
   assert.ok(await admin.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
-  await admin.getByLabel("Ajouter une carte lors de la validation").check();
-  await admin.getByRole("button", { name: "Valider le compte" }).click();
+  await admin.getByLabel("Ajouter une carte lors de la validation").first().check();
+  await admin.getByRole("button", { name: "Valider le compte" }).first().click();
   await admin.getByText("Demande validée.").first().waitFor();
   assert.equal(decisions[0].url, "/api/admin/registrations/r1/approve");
   assert.equal(decisions[0].body.add_card, true);
+  await admin.getByRole("button", { name: "Valider le compte" }).click();
+  await admin.getByText("Email alice@example.org", { exact: false }).waitFor({ state: "hidden" });
+  assert.equal(decisions[1].url, "/api/admin/registrations/r2/approve");
+  assert.equal(decisions[1].body.add_card, false);
   await admin.getByRole("button", { name: "Attribuer la carte" }).click();
   await admin.getByText("Aucune demande en attente.").waitFor();
-  assert.equal(decisions[1].url, "/api/admin/card-requests/c1/approve");
-  assert.equal(decisions[1].body.prefix, "A");
+  assert.equal(decisions[2].url, "/api/admin/card-requests/c1/approve");
+  assert.equal(decisions[2].body.prefix, "A");
 
   const member = await browser.newPage({ viewport: { width: 375, height: 700 }, serviceWorkers: "block" });
   member.on("pageerror", error => errors.push(error.message));
