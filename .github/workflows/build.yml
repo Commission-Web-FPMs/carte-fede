@@ -15,7 +15,7 @@ jobs:
 
     steps:
       # ------------------------------------------------------------
-      # Build site-fede
+      # Build backend. La publication du frontend/Nginx reste à ajouter.
       # ------------------------------------------------------------
 
       - name: Checkout source

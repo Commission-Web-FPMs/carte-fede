@@ -1,95 +1,70 @@
-# Carte Fédé Test
+# Carte Fédé
 
-Application web de gestion de cartes pour la fédération des étudiants de la F.P.Ms.  
-Elle combine **Astro** pour le frontend et **Flask** (Python) pour le backend, avec une base **PostgreSQL** et un déploiement via **Docker Compose**.
+Application de gestion des comptes, des cartes annuelles et de leur vérification pour la Fédération des étudiants FPMs.
 
----
+Les utilisateurs peuvent demander un compte, demander une carte, consulter leurs cartes et afficher un QR de vérification. Les administrateurs valident les demandes, confirment les paiements, attribuent les cartes et configurent les coordonnées de paiement. L'authentification utilise les cookies de session Flask.
 
-## ✨ Fonctionnalités actuelles
+## Organisation
 
-### 🔐 Authentification
-- Connexion par **email** ou par **identifiant à 6 chiffres**.
-- Mot de passe généré automatiquement lors de la création de l’utilisateur (modifiable par la suite).
-- Gestion de session via cookies.
+| Dossier | Rôle |
+| --- | --- |
+| `backend/` | API Flask, modèles SQLAlchemy, migrations SQL et scripts Python. Gunicorn écoute sur `8000`. |
+| `frontend/` | Pages Astro et composants React. Le build produit des fichiers statiques dans `dist/`. |
+| `nginx/` | Image de production qui construit le frontend, sert ses fichiers et transmet `/api/` à Flask. Nginx écoute sur `80`. |
+| `docs/` | Description du fonctionnement et des procédures. |
+| `.github/workflows/` | Publication d'image sur GHCR et mise à jour du dépôt de déploiement. |
 
-### 👤 Utilisateur (membre)
-- Page **Mes cartes** listant ses cartes par période (ex: 2024-2025 → `A-23`).
-- Connexion/déconnexion via interface.
+Le Compose actuel lance **trois services** : `nginx`, `backend` et `db`. Il n'y a pas de serveur Astro ou Node en production. Le `frontend/Dockerfile` lance uniquement un serveur de développement et n'est utilisé ni par ce Compose ni par le workflow actuel.
 
-### 🛠️ Administrateur
-- Interface de gestion des utilisateurs.
-- Création d’utilisateurs avec nom, prénom et identifiant.
-- Attribution de cartes par période scolaire :
-  - Choix d’une période dans une liste déroulante.
-  - Numéro de carte généré automatiquement (plus petit libre).
-  - Préfixes autorisés : `A`, `F`, `E`, `EA`, `MI`, `S`.
-  - Normalisation des numéros (`023` → `23`).
-- Suppression d’une carte avec confirmation.
-- Liste de toutes les cartes attribuées à un utilisateur.
+```mermaid
+flowchart LR
+    browser[Navigateur] --> nginx[Nginx :80]
+    nginx --> static[Pages et assets Astro]
+    nginx -->|/api/| backend[Flask / Gunicorn :8000]
+    backend --> db[PostgreSQL :5432]
+    backend --> smtp[Serveur SMTP]
+```
 
-### ⚙️ Technique
-- Frontend : [Astro](https://astro.build/) (pages statiques + fetch API).
-- Backend : [Flask](https://flask.palletsprojects.com/) + [Flask-Login](https://flask-login.readthedocs.io/).
-- Base de données : PostgreSQL + SQLAlchemy.
-- Reverse proxy : Nginx.
-- Déploiement : Docker Compose (3 services → frontend, backend, db, + nginx).
+Les appels du navigateur utilisent des chemins relatifs `/api/...`. Le site et l'API doivent donc rester accessibles sur le même domaine. Les contrôles de session dans le frontend facilitent la navigation ; Flask contrôle les droits d'accès aux données.
 
----
-
-## 🚀 Installation & lancement
-
-Cloner le dépôt et exécuter :
+## Lancement local
 
 ```bash
-git clone https://github.com/theau-pauwels/carte-fede-test.git
-cd carte-fede-test
+cp .env.example .env
+# Renseigner SECRET_KEY dans .env avant le lancement.
 docker compose up --build
 ```
 
-Accès :
-- Frontend : http://localhost  
-- API Backend : http://localhost/api
+Le site est exposé sur `http://localhost`, l'API sur `http://localhost/api/` et son contrôle de disponibilité sur `http://localhost/api/health`. PostgreSQL et Gunicorn n'ont pas de port publié sur la machine hôte. Le volume `db_data` conserve la base.
 
----
+Sur une base vide, activer temporairement `AUTO_CREATE_DB=1` pour créer les tables à partir des modèles, puis remettre la variable à `0`. Sur une base existante, appliquer les migrations dans l'ordre décrit dans [self-registration.md](docs/self-registration.md). Le démarrage ordinaire ne les applique pas.
 
-## ✅ Ce qui fonctionne déjà
-- Authentification email/ID.
-- Gestion des sessions utilisateurs/admin.
-- Création/suppression de cartes avec contraintes d’unicité par période.
-- UI basique pour les membres et les administrateurs.
-- Synchronisation DB avec SQLAlchemy (tables `User` et `Membership`).
+Les cookies de session et de connexion persistante sont actuellement forcés à `Secure=True` dans `backend/app/__init__.py`. Le lancement local ne configure pas HTTPS ; le comportement de connexion en HTTP doit être adapté ou utilisé derrière un proxy HTTPS. Aucune variable d'environnement ne permet actuellement de modifier ces deux options.
 
----
+Le backend est monté depuis `./backend` dans Compose. Cette configuration locale n'est pas un modèle de déploiement de production avec des images immuables.
 
-## 🔜 Roadmap / À faire
-- [ ] **Système d’email** : envoi automatique d’un mot de passe temporaire lors de la création du compte.
-- [ ] **Améliorer l’UI** (style, responsivité).
-- [ ] **Gestion des erreurs côté frontend** (messages plus clairs).
-- [ ] **Page Admin → création utilisateur** directement depuis l’UI (clarification de l'interface et des options).
-- [ ] **Page Admin → édition/suppression utilisateur**.
-- [ ] **QR Code temporaire** des cartes pour une soirée/occasion.
-- [ ] **Déploiement en prod** (config TLS, nom de domaine, CI/CD).
-- [ ] **Tests unitaires & end-to-end** pour sécuriser le projet.
+## Workflow et déploiement
 
----
+À chaque push de branche, [build.yml](.github/workflows/build.yml) :
 
-## 📂 Structure du dépôt
+1. Construit **uniquement le backend** depuis `backend/`.
+2. Publie `ghcr.io/commission-web-fpms/carte-fede:<SHA du commit>`.
+3. Utilise une GitHub App pour accéder à [carte-fede-deployment](https://github.com/Commission-Web-FPMs/carte-fede-deployment).
+4. Sélectionne la branche de même nom dans ce dépôt, ou la crée depuis `main`.
+5. Modifie `image.tag` dans `values.yaml`, puis y pousse un commit `deploy: <SHA>`.
 
-```
-carte-fede-test/
-├── backend/         # Flask + API REST
-│   ├── app/         # modèles, routes, logique
-│   ├── scripts/     # scripts utilitaires (création admin, reset mdp, etc.)
-│   └── wsgi.py      # point d'entrée Gunicorn
-├── frontend/        # Astro
-│   ├── src/pages/   # pages (login, cartes, admin…)
-│   └── src/components/ # Footer, Layout…
-├── nginx/           # config reverse proxy
-├── docker-compose.yml
-└── README.md
-```
+Le workflow ne lance pas Docker Compose et ne déploie pas directement sur Kubernetes. L'application de ce commit dépend du contrôleur GitOps configuré dans le cluster. Une branche de déploiement créée par le workflow ne crée pas, à elle seule, un environnement.
 
----
+Le chart Helm consulté sur `main` le 9 octobre 2026 décrit un seul conteneur backend sur `8000`. Il ne contient ni frontend/Nginx ni PostgreSQL. Le workflow et ce chart doivent évoluer ensemble pour déployer le site complet.
 
-## 📝 Licence
+Le détail des composants, les incohérences relevées et la proposition pour les images, ports et accès se trouvent dans [architecture.md](docs/architecture.md).
+
+## Vérifications disponibles
+
+Le backend contient `backend/tests/test_requests.py`, qui utilise une base PostgreSQL jetable et recrée ses tables. Son garde-fou exige une URL locale sur le port `15432`. Le frontend contient des scripts dans `frontend/scripts/` pour les requêtes, le chargement des pages, les sessions, l'interface mobile et le cache du service worker. Certains nécessitent Playwright et un site lancé séparément.
+
+Ces vérifications ne sont pas exécutées par le workflow actuel. Le script `npm run build` exécute `astro check` puis `astro build`, mais le workflow actuel ne construit pas le frontend.
+
+## Licence
+
 Libre pour un usage personnel ou associatif. À compléter pour la redistribution.
