@@ -1,0 +1,149 @@
+name: Build and publish
+
+on:
+  push:
+    branches:
+      - "**"
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      # ------------------------------------------------------------
+      # Build site-fede
+      # ------------------------------------------------------------
+
+      - name: Checkout source
+        uses: actions/checkout@v6
+
+      - name: Compute image name
+        id: image
+        shell: bash
+        run: |
+          echo "name=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+
+      - name: Login to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v7
+        with:
+          context: backend/
+          push: true
+          tags: |
+            ${{ steps.image.outputs.name }}:${{ github.sha }}
+
+      # ------------------------------------------------------------
+      # Auth GitHub App
+      # ------------------------------------------------------------
+
+      - name: Generate deployment GitHub App token
+        id: deploy-token
+        uses: actions/create-github-app-token@v3
+        with:
+          client-id: ${{ vars.DEPLOY_APP_CLIENT_ID }}
+          private-key: ${{ secrets.DEPLOY_APP_PRIVATE_KEY }}
+          owner: Commission-Web-FPMs
+          repositories: |
+            carte-fede-deployment
+          permission-contents: write
+
+      # On checkout main initialement car la branche correspondante
+      # n'existe peut-être pas encore dans le repo GitOps.
+      - name: Checkout deployment repository
+        uses: actions/checkout@v6
+        with:
+          repository: Commission-Web-FPMs/carte-fede-deployment
+          ref: main
+          token: ${{ steps.deploy-token.outputs.token }}
+          path: deployment
+          fetch-depth: 0
+
+      # ------------------------------------------------------------
+      # Sélection/création de la branche GitOps
+      # ------------------------------------------------------------
+
+      - name: Checkout matching deployment branch
+        working-directory: deployment
+        env:
+          TARGET_BRANCH: ${{ github.ref_name }}
+        run: |
+          if git ls-remote \
+            --exit-code \
+            --heads origin \
+            "refs/heads/${TARGET_BRANCH}" \
+            > /dev/null 2>&1
+          then
+            echo "Branch '${TARGET_BRANCH}' exists"
+
+            git fetch origin \
+              "refs/heads/${TARGET_BRANCH}:refs/remotes/origin/${TARGET_BRANCH}"
+
+            git switch -C \
+              "${TARGET_BRANCH}" \
+              "origin/${TARGET_BRANCH}"
+          else
+            echo "Branch '${TARGET_BRANCH}' does not exist, creating from main"
+
+            git switch -c \
+              "${TARGET_BRANCH}" \
+              "origin/main"
+          fi
+
+      # ------------------------------------------------------------
+      # Update values.yaml
+      # ------------------------------------------------------------
+
+      - name: Update image tag
+        working-directory: deployment
+        run: |
+          sed -i \
+            "/^image:/,/^[^[:space:]]/ s|^  tag:.*|  tag: ${GITHUB_SHA}|" \
+            values.yaml
+
+          echo "New image configuration:"
+          sed -n '/^image:/,/^[^[:space:]]/p' values.yaml
+
+      # ------------------------------------------------------------
+      # Commit avec identité de la GitHub App
+      # ------------------------------------------------------------
+
+      - name: Get GitHub App user ID
+        id: app-user
+        env:
+          GH_TOKEN: ${{ steps.deploy-token.outputs.token }}
+          APP_SLUG: ${{ steps.deploy-token.outputs.app-slug }}
+        run: |
+          USER_ID="$(gh api "/users/${APP_SLUG}[bot]" --jq '.id')"
+          echo "id=${USER_ID}" >> "$GITHUB_OUTPUT"
+
+      - name: Commit deployment version
+        working-directory: deployment
+        env:
+          TARGET_BRANCH: ${{ github.ref_name }}
+          APP_SLUG: ${{ steps.deploy-token.outputs.app-slug }}
+          APP_USER_ID: ${{ steps.app-user.outputs.id }}
+        run: |
+          git config user.name "${APP_SLUG}[bot]"
+          git config user.email \
+            "${APP_USER_ID}+${APP_SLUG}[bot]@users.noreply.github.com"
+
+          git add values.yaml
+
+          if git diff --cached --quiet; then
+            echo "Nothing to commit"
+            exit 0
+          fi
+
+          git commit -m "deploy: ${GITHUB_SHA}"
+
+          git push origin "${TARGET_BRANCH}"
