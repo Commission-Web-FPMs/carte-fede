@@ -19,6 +19,7 @@ build/
 # Node
 node_modules/
 frontend/.astro/
+frontend/runtime-templates/
 pnpm-lock.yaml
 yarn.lock
 npm-debug.log*

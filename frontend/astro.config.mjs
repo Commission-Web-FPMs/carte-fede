@@ -1,5 +1,4 @@
 import { defineConfig } from "astro/config";
-import vercel from "@astrojs/vercel";
 import react from "@astrojs/react";
 import tailwind from "@astrojs/tailwind";
 import sitemap from "@astrojs/sitemap";
@@ -15,13 +14,9 @@ export default defineConfig({
     sitemap(),
     robotsTxt(),
   ],
-  site: "https://carte.fede.fpms.ac.be",
+  // Replaced with FRONTEND_BASE_URL when the frontend container starts.
+  site: "https://runtime.invalid",
   output: "static",
-  adapter: vercel({
-    webAnalytics: {
-      enabled: process.env.VERCEL === "1",
-    },
-  }),
   serverOptions: {
     headers: {
       "Content-Security-Policy":

@@ -17,7 +17,6 @@ services:
   backend:
     restart: always
     build: ./backend
-    command: gunicorn -b 0.0.0.0:8000 wsgi:app --workers 3
     depends_on:
       db:
         condition: service_healthy
@@ -25,6 +24,13 @@ services:
       - .env
     volumes:
       - ./backend:/app
+
+  frontend:
+    restart: always
+    build: ./frontend
+    environment:
+      PORT: "8080"
+      FRONTEND_BASE_URL: ${FRONTEND_BASE_URL:-http://localhost}
 
   nginx:
     restart: always
@@ -35,6 +41,7 @@ services:
       - "80:80"
     depends_on:
       - backend
+      - frontend
 
 volumes:
   db_data:

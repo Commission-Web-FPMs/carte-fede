@@ -210,9 +210,8 @@ def _qr_serializer():
     )
 
 def _abs_host():
-    # ex: http://localhost/
-    base = request.host_url  # ex: 'http://localhost/'
-    return base
+    base = (current_app.config.get("FRONTEND_BASE_URL") or request.host_url).strip()
+    return base.rstrip("/") + "/"
 
 @bp_mem.route("/api/qr/<int:annee>.png", methods=["GET"])
 @login_required

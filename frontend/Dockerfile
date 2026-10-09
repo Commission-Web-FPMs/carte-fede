@@ -1,13 +1,16 @@
-FROM node:20
+FROM node:22-alpine AS build
 WORKDIR /app
-
-# Copie uniquement les manifests pour profiter du cache Docker
-COPY package.json package-lock.json* ./
-
-RUN npm install
-
-# Copie du reste du code
+COPY package.json package-lock.json ./
+RUN npm ci
 COPY . .
+RUN npm run build && node scripts/prepare-runtime.mjs
 
-# Lancer le serveur de dev Astro exposé
-CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0", "--watch"]
+FROM nginx:stable-alpine
+ENV PORT=8080 \
+    FRONTEND_BASE_URL=https://carte.fede.fpms.ac.be \
+    NGINX_ENVSUBST_FILTER=^PORT$
+COPY nginx/default.conf.template /etc/nginx/templates/default.conf.template
+COPY --from=build /app/dist /usr/share/nginx/html
+COPY --from=build /app/runtime-templates /opt/frontend-templates
+COPY --chmod=755 nginx/40-runtime-url.sh /docker-entrypoint.d/40-runtime-url.sh
+EXPOSE 8080

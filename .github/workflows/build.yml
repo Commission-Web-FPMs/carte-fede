@@ -9,13 +9,17 @@ permissions:
   contents: read
   packages: write
 
+concurrency:
+  group: publish-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   build:
     runs-on: ubuntu-latest
 
     steps:
       # ------------------------------------------------------------
-      # Build backend. La publication du frontend/Nginx reste à ajouter.
+      # Publish both application images before updating GitOps.
       # ------------------------------------------------------------
 
       - name: Checkout source
@@ -34,13 +38,21 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and push
+      - name: Build and push backend
         uses: docker/build-push-action@v7
         with:
           context: backend/
           push: true
           tags: |
             ${{ steps.image.outputs.name }}:${{ github.sha }}
+
+      - name: Build and push frontend
+        uses: docker/build-push-action@v7
+        with:
+          context: frontend/
+          push: true
+          tags: |
+            ${{ steps.image.outputs.name }}-frontend:${{ github.sha }}
 
       # ------------------------------------------------------------
       # Auth GitHub App
@@ -103,15 +115,12 @@ jobs:
       # Update values.yaml
       # ------------------------------------------------------------
 
-      - name: Update image tag
+      - name: Update both image tags
         working-directory: deployment
+        env:
+          IMAGE_REPOSITORY: ${{ steps.image.outputs.name }}
         run: |
-          sed -i \
-            "/^image:/,/^[^[:space:]]/ s|^  tag:.*|  tag: ${GITHUB_SHA}|" \
-            values.yaml
-
-          echo "New image configuration:"
-          sed -n '/^image:/,/^[^[:space:]]/p' values.yaml
+          python3 ../.github/scripts/update-deployment-images.py
 
       # ------------------------------------------------------------
       # Commit avec identité de la GitHub App

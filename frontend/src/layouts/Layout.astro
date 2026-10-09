@@ -64,7 +64,7 @@ const canonicalURL = new URL(Astro.url.pathname, Astro.site)
         <>
           <meta
             name="og:image"
-            content={canonicalURL.toString().slice(0, -1) + image.src}
+            content={new URL(image.src, canonicalURL).toString()}
           />
           <meta
             name="og:image:alt"
