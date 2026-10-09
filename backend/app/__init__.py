@@ -8,12 +8,15 @@ from .routes_admin import bp_admin
 from .routes_memberships import bp_mem
 from .card_payment import bp_payment
 from werkzeug.middleware.proxy_fix import ProxyFix
+from .safe_logging import configure_logging, log_exception
 
 def _env_bool(name, default):
     return os.getenv(name, str(default)).strip().lower() in ("1", "true", "yes", "on")
 
 def create_app():
     app = Flask(__name__)
+    configure_logging(app)
+    app.log_exception = lambda exc_info: log_exception("unhandled_request_error", exc_info)
     remember_days = int(os.getenv("REMEMBER_COOKIE_DAYS", "30"))
     database_url = os.getenv("DATABASE_URL", "").strip()
     secret_key = os.getenv("SECRET_KEY", "").strip()
@@ -26,7 +29,7 @@ def create_app():
     app.config["SQLALCHEMY_DATABASE_URI"] = database_url
     app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
     app.config["SECRET_KEY"] = secret_key
-    app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {"pool_pre_ping": True}
+    app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {"pool_pre_ping": True, "hide_parameters": True, "echo": False}
     app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
     app.config["SESSION_COOKIE_SECURE"] = _env_bool("SESSION_COOKIE_SECURE", True)
     app.config["SESSION_COOKIE_HTTPONLY"] = True
@@ -85,6 +88,6 @@ def create_app():
             try:
                 db.create_all()
             except Exception:
-                app.logger.exception("Auto-create tables failed")
+                log_exception("auto_create_tables_failed")
 
     return app

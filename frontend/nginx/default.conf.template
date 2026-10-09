@@ -1,3 +1,12 @@
+map $request_method $privacy_method {
+    default OTHER;
+    GET GET; HEAD HEAD; POST POST; PUT PUT; PATCH PATCH; DELETE DELETE; OPTIONS OPTIONS;
+}
+log_format privacy '$privacy_method $status $request_time';
+access_log /dev/stdout privacy;
+# Nginx error lines contain the full request target, including reset/QR tokens.
+error_log /dev/null;
+
 server {
     listen ${PORT};
     server_name _;

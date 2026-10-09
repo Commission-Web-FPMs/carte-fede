@@ -4,6 +4,7 @@ from .models import db, User, Role, PendingRegistration
 from werkzeug.security import generate_password_hash, check_password_hash
 from itsdangerous import BadSignature, SignatureExpired
 from .email_utils import send_email
+from .safe_logging import log_exception
 from .password_reset import generate_reset_token, verify_reset_token
 from .routes_memberships import current_academic_year
 from sqlalchemy import func
@@ -41,13 +42,12 @@ def login():
             "role": role_value
         }})
     except Exception:
-        current_app.logger.exception("Login error")
+        log_exception("login_failed")
         return jsonify({"error": "Server error"}), 500
 
 @bp_auth.route("/api/auth/logout", methods=["POST"])
 @login_required
 def logout():
-    print("Logout user:", current_user)
     logout_user()
     return jsonify({"ok": True})
 
@@ -122,7 +122,7 @@ def register():
         return jsonify({"ok": True, "expires_at": pending.expires_at.isoformat(), "card_year": pending.card_year}), 202
     except Exception:
         db.session.rollback()
-        current_app.logger.exception("Register error")
+        log_exception("register_failed")
         return jsonify({"error": "Inscription indisponible. Réessayez plus tard."}), 500
 
 
@@ -186,7 +186,7 @@ def request_password_reset():
     try:
         send_email(recipient, "Reinitialisation de mot de passe", body)
     except Exception:
-        current_app.logger.exception("Password reset email failed")
+        log_exception("password_reset_email_failed")
 
     return jsonify({"ok": True})
 

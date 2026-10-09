@@ -9,7 +9,7 @@ with app.app_context():
     email = "admin@example.com"
     user = User.query.filter_by(email=email.lower()).first()
     if user:
-        print("Admin déjà existant:", email)
+        print("Admin déjà existant")
     else:
         u = User(
             email=email.lower(),
@@ -20,4 +20,4 @@ with app.app_context():
         )
         db.session.add(u)
         db.session.commit()
-        print("Admin créé:", email, "/ monpass")
+        print("Admin créé")

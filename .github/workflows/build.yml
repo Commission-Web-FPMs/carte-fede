@@ -14,7 +14,51 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: carte_fede_ci
+          POSTGRES_INITDB_ARGS: --locale-provider=icu --icu-locale=en-US --encoding=UTF8
+        ports:
+          - 15432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d carte_fede_ci"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install -r backend/requirements.txt
+      - name: Backend synthetic privacy tests
+        working-directory: backend
+        run: python -m unittest discover -s tests -p 'test_log_privacy.py' -v
+      - name: Backend request flow on disposable PostgreSQL 18 ICU
+        working-directory: backend
+        env:
+          DATABASE_URL: postgresql+psycopg://postgres:postgres@127.0.0.1:15432/carte_fede_ci
+          SECRET_KEY: synthetic-ci-only-not-production
+          AUTO_CREATE_DB: '1'
+        run: python -m unittest discover -s tests -p 'test_requests.py' -v
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Frontend privacy checks and build
+        working-directory: frontend
+        run: |
+          npm ci
+          node --test tests/*.test.mjs
+          npm run build
+          node scripts/prepare-runtime.mjs
+
   build:
+    needs: test
     runs-on: ubuntu-latest
 
     steps:
