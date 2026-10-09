@@ -19,6 +19,10 @@ def create_app():
     secret_key = os.getenv("SECRET_KEY", "").strip()
     if not database_url or not secret_key:
         raise RuntimeError("DATABASE_URL and SECRET_KEY must be supplied in the environment")
+    for prefix in ("postgresql://", "postgres://"):
+        if database_url.startswith(prefix):
+            database_url = "postgresql+psycopg://" + database_url[len(prefix):]
+            break
     app.config["SQLALCHEMY_DATABASE_URI"] = database_url
     app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
     app.config["SECRET_KEY"] = secret_key
