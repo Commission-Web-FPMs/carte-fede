@@ -66,9 +66,11 @@ def card_payment_settings():
 @bp_admin.get("/api/admin/requests")
 def pending_requests():
     now = datetime.utcnow()
-    PendingRegistration.query.filter(PendingRegistration.expires_at <= now).delete()
-    db.session.commit()
-    registrations = PendingRegistration.query.order_by(PendingRegistration.created_at.asc()).all()
+    # A consultation must also work during readonly migration validation.
+    # Expired requests stay stored until an explicit write flow cleans them up.
+    registrations = PendingRegistration.query.filter(
+        PendingRegistration.expires_at > now
+    ).order_by(PendingRegistration.created_at.asc()).all()
     cards = PendingCardRequest.query.filter(PendingCardRequest.status.in_(("pending", "payment_required"))).order_by(PendingCardRequest.created_at.asc()).all()
     return jsonify({
         "registrations": [{"id": row.id, "nom": row.nom, "prenom": row.prenom,

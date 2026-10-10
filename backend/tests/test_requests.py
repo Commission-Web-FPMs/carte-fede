@@ -90,6 +90,31 @@ class RequestsFlowTest(unittest.TestCase):
             self.assertEqual(PendingCardRequest.query.count(), 0)
         self.assertEqual(self.post(self.public, "/api/auth/register", pending).status_code, 409)
 
+    def test_pending_queue_is_readonly_and_retains_expired_rows(self):
+        from sqlalchemy import event
+        with self.app.app_context():
+            expired = PendingRegistration(email="expired@synthetic.invalid", nom="Expired", prenom="Fixture",
+                password_hash=generate_password_hash("synthetic-password"), expires_at=datetime.utcnow()-timedelta(days=1))
+            active = PendingRegistration(email="active@synthetic.invalid", nom="Active", prenom="Fixture",
+                password_hash=generate_password_hash("synthetic-password"), expires_at=datetime.utcnow()+timedelta(days=1))
+            db.session.add_all([expired, active])
+            db.session.commit()
+            expired_id, active_id = expired.id, active.id
+            engine = db.engine
+        self.assertEqual(self.post(self.admin, "/api/auth/login", {"identifiant":"999999", "password":"admin-test-password"}).status_code, 200)
+        def forbid_write(conn, cursor, statement, parameters, context, executemany):
+            self.assertEqual(statement.lstrip().split(None, 1)[0].upper(), "SELECT")
+        event.listen(engine, "before_cursor_execute", forbid_write)
+        try:
+            response = self.get(self.admin, "/api/admin/requests")
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual([row["id"] for row in response.json["registrations"]], [active_id])
+        finally:
+            event.remove(engine, "before_cursor_execute", forbid_write)
+        with self.app.app_context():
+            self.assertIsNotNone(db.session.get(PendingRegistration, expired_id))
+
+
     def test_non_umons_registration_with_email(self):
         year = current_academic_year()
         payload = {"nom": "Bernard", "prenom": "Alice", "email": " Alice@Example.org ",
