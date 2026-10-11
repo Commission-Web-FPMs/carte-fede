@@ -17,25 +17,20 @@ export default function RequireAuth({
 
   useEffect(() => {
     const checkAuth = async () => {
-      console.log("[RequireAuth] Début de la vérification d'authentification");
 
       try {
         const res = await fetchCurrentUser();
-        console.log("[RequireAuth] Response status:", res.status);
 
         if (!res.ok) {
-          console.warn("[RequireAuth] Non autorisé, redirection vers", redirectTo);
-          window.location.href = redirectTo;
+          const mode = await fetch('/api/auth/mode', {credentials:'include'}).then(r => r.ok ? r.json() : null);
+          window.location.href = mode?.mode === 'oidc' ? '/api/auth/oidc/login?expired=1' : redirectTo;
         } else {
           const data = await res.json();
-          console.log("[RequireAuth] Connecté ! Données reçues :", data);
           setAuthorized(true);
         }
       } catch (err) {
-        console.error("[RequireAuth] Erreur lors de la requête fetch :", err);
         window.location.href = redirectTo;
       } finally {
-        console.log("[RequireAuth] Vérification terminée");
         setChecking(false);
       }
     };
@@ -44,15 +39,12 @@ export default function RequireAuth({
   }, [redirectTo]);
 
   if (checking) {
-    console.log("[RequireAuth] Toujours en vérification...");
     return <>{loader}</>;
   }
 
   if (!authorized) {
-    console.log("[RequireAuth] Pas autorisé, mais la redirection devrait se produire");
     return null;
   }
 
-  console.log("[RequireAuth] Autorisé, affichage des enfants");
   return <>{children}</>;
 }

@@ -83,7 +83,7 @@ class OIDCSecurity(unittest.TestCase):
             return {'role':current_user.role.value}
         c=app.test_client()
         with c.session_transaction() as session:
-            session.update(oidc_sub='synthetic-sub',oidc_access_token='synthetic-token',oidc_expires_at=time.time()+200)
+            session.update(oidc_sub='synthetic-sub',oidc_access_token='synthetic-token',oidc_expires_at=time.time()+200,oidc_created_at=time.time(),oidc_last_activity=time.time(),activity_csrf="synthetic-csrf")
         with patch('app.oidc_dev.current_user') as user,patch('app.oidc_dev.requests.get') as get,patch('app.oidc_dev.requests.post'):
             user.is_authenticated=True;user.id='synthetic-business-uuid'
             get.return_value.json.return_value={'sub':'synthetic-sub','carte_fede_uuid':'synthetic-business-uuid','carte_fede_dev_allowed':True,'roles':['admin'],'groups':['membres']}

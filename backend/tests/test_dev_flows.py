@@ -40,7 +40,7 @@ class DevFlows(unittest.TestCase):
   return SimpleNamespace(raise_for_status=lambda:None,json=lambda:{'sub':sub,'carte_fede_uuid':self.ids.get(sub,''),'carte_fede_dev_allowed':True,'roles':['admin'],'groups':['superusers']})
  def client(self,role):
   c=self.app.test_client()
-  with c.session_transaction() as s:s.update(_user_id=self.ids[role],_fresh=True,oidc_sub=role,oidc_access_token=role,oidc_expires_at=time.time()+300)
+  with c.session_transaction() as s:s.update(_user_id=self.ids[role],_fresh=True,oidc_sub=role,oidc_access_token=role,oidc_expires_at=time.time()+300,oidc_created_at=time.time(),oidc_last_activity=time.time(),activity_csrf="synthetic-csrf")
   return c
  def business(self,n='800001'):return dict(nom='Synthetic',prenom='Signup',member_id=n)
  def hook(self,sub,pk=1,operation='created',business=None,signature=True):
@@ -147,7 +147,7 @@ class DevFlows(unittest.TestCase):
  def test_existing_valid_session_home_and_revoked_session_reauthentication(self):
   c=self.client('member');r=c.get('/api/auth/oidc/login?next=//evil.invalid')
   self.assertEqual(r.status_code,302);self.assertEqual(r.location,ORIGIN+'/')
-  with c.session_transaction() as s:s['oidc_expires_at']=time.time()-1
+  with c.session_transaction() as s:s['oidc_last_activity']=time.time()-1801
   with patch('app.oidc_dev.requests.post'):
    r=c.get('/api/auth/oidc/login')
   self.assertTrue(r.location.startswith('https://auth.fede.fpms.ac.be/application/o/authorize/'))

@@ -1,9 +1,7 @@
 ---
 import Layout from "@layouts/Layout.astro";
-import AppQr from "@components/app/AppQr";
 ---
-<Layout title="Mon QR carte fédé">
-  <div class="min-h-screen bg-gradient-to-br from-slate-100 via-sky-50 to-blue-100">
-    <AppQr client:load />
-  </div>
+<Layout title="Mes cartes">
+  <p class="p-6"><a href="/cartes/">Voir mes cartes et leurs QR</a></p>
 </Layout>
+<script>window.location.replace('/cartes/');</script>

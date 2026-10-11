@@ -114,6 +114,10 @@ const canonicalURL = new URL(Astro.url.pathname, Astro.site)
     </aside>
     <script is:inline src="/pwa-register.js" defer></script>
     <script>
+      import { installDevSession } from "../lib/dev-session";
+      fetch('/api/auth/mode', {credentials:'include'}).then(r => r.ok ? r.json() : null).then(d => { if (d?.mode === 'oidc') installDevSession(); }).catch(() => {});
+    </script>
+    <script>
       interface InstallPrompt extends Event {
         prompt: () => Promise<void>;
         userChoice: Promise<{ outcome: string }>;

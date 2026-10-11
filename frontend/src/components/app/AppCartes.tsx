@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import CardRequestPanel from "../CardRequest";
 import { fetchCurrentUser } from "../../lib/current-user";
 import { academicYear, currentYear, request } from "../../lib/admin-users";
 
@@ -96,32 +97,6 @@ export default function AppCartes() {
     window.setTimeout(() => setCopyMessage(""), 2200);
   };
 
-  async function askForCard() {
-    if (requestBusy) return;
-    setRequestBusy(true);
-    setRequestMessage("");
-    setRequestError(false);
-    try {
-      await request("/api/memberships/requests", "POST", {
-        annee: requestYear,
-      });
-      setRequests((previous) => [
-        ...previous.filter((item) => item.annee !== requestYear),
-        { annee: requestYear, status: "payment_required" },
-      ]);
-      setRequestMessage("Demande envoyée : paiement requis, puis validation par un administrateur.");
-    } catch (error) {
-      setRequestError(true);
-      setRequestMessage(
-        error instanceof Error
-          ? error.message
-          : "Demande impossible. Réessayez.",
-      );
-    } finally {
-      setRequestBusy(false);
-    }
-  }
-
   async function generatePaymentQr() {
     setPaymentError("");
     try {
@@ -156,10 +131,10 @@ export default function AppCartes() {
             </p>
           </div>
           <a
-            href="/app/qr"
+            href="#mes-cartes"
             className="inline-flex items-center justify-center rounded-full bg-gradient-to-r from-blue-600 to-indigo-500 px-6 py-3 text-base font-bold text-white shadow-sm transition hover:from-blue-700 hover:to-indigo-600"
           >
-            Générer mon QR
+            Voir mes cartes et QR
           </a>
         </div>
 
@@ -187,65 +162,7 @@ export default function AppCartes() {
         className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6"
         aria-labelledby="card-request-title"
       >
-        <h2
-          id="card-request-title"
-          className="text-xl font-semibold text-blue-900"
-        >
-          Demander une carte Fédé
-        </h2>
-        <p className="mt-1 text-sm text-slate-600">
-          Votre carte sera créée après validation par un administrateur.
-        </p>
-        <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-end">
-          <label className="block flex-1 text-sm font-medium text-slate-700">
-            Année académique
-            <select
-              className="mt-2 min-h-11 w-full rounded-xl border border-slate-300 bg-white px-3 text-base"
-              value={requestYear}
-              onChange={(event) => {
-                setRequestYear(Number(event.target.value));
-                if (paymentQr) URL.revokeObjectURL(paymentQr);
-                setPaymentQr("");
-              }}
-            >
-              {[currentYear(), currentYear() + 1].map((year) => (
-                <option value={year} key={year}>
-                  {academicYear(String(year))}
-                </option>
-              ))}
-            </select>
-          </label>
-          <button
-            type="button"
-            onClick={() => void askForCard()}
-            disabled={
-              requestBusy ||
-              memberships.some((item) => item.annee === requestYear) ||
-              requests.some(
-                (item) =>
-                  item.annee === requestYear && item.status !== "rejected",
-              )
-            }
-            className="min-h-11 rounded-xl bg-blue-900 px-4 py-2 font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {requestBusy ? "Envoi…" : "Demander cette carte"}
-          </button>
-        </div>
-        {memberships.some((item) => item.annee === requestYear) && (
-          <p className="mt-2 text-sm text-slate-600">
-            Vous possédez déjà une carte pour cette année.
-          </p>
-        )}
-        {requests.map((item) => (
-          <p className="mt-2 text-sm text-slate-700" key={item.annee}>
-            {academicYear(String(item.annee))} :{" "}
-            {item.status === "pending"
-              ? "en attente de validation"
-              : item.status === "payment_required"
-                ? "paiement requis"
-              : "demande refusée, vous pouvez en envoyer une nouvelle"}
-          </p>
-        ))}
+        <CardRequestPanel inCards onRequestsChange={setRequests} onYearChange={(year) => { setRequestYear(year); if (paymentQr) URL.revokeObjectURL(paymentQr); setPaymentQr(""); }} />
         {requests.some((item) => item.annee === requestYear && item.status === "payment_required") && (
           <div className="mt-4 rounded-2xl border border-blue-200 bg-blue-50 p-4 text-sm text-slate-700">
             <p className="font-semibold text-blue-900">Paiement de la carte Fédé</p>
@@ -260,14 +177,6 @@ export default function AppCartes() {
             {paymentError && <p role="alert" className="mt-2 text-red-700">{paymentError}</p>}
           </div>
         )}
-        {requestMessage && (
-          <p
-            role={requestError ? "alert" : "status"}
-            className={`mt-3 rounded-xl p-3 text-sm ${requestError ? "bg-red-50 text-red-800" : "bg-blue-50 text-blue-900"}`}
-          >
-            {requestMessage}
-          </p>
-        )}
       </section>
 
       {!memberships.length ? (
@@ -275,7 +184,7 @@ export default function AppCartes() {
           Aucune carte active disponible.
         </article>
       ) : (
-        <div className="grid gap-4 md:grid-cols-2">
+        <div id="mes-cartes" className="grid gap-4 md:grid-cols-2">
           {memberships.map((item) => (
             <article
               key={item.annee}
@@ -301,6 +210,7 @@ export default function AppCartes() {
                 {padCode(item.annee_code)}
               </div>
 
+              <img src={`/api/qr/${item.annee}.png`} alt={`QR de vérification de la carte ${formatAcademicYear(item.annee)}`} className="mt-4 w-56 max-w-full rounded-xl bg-white p-2" loading="lazy" />
               <button
                 type="button"
                 onClick={() => copyIdentifier(item.annee_code)}
