@@ -63,6 +63,19 @@ class OIDCSecurity(unittest.TestCase):
             self.assertEqual(client.get(path).status_code,401)
         for path in ['/api/auth/login','/api/auth/register','/api/card-payment/qr']:
             self.assertEqual(client.post(path).status_code,403)
+    def test_existing_account_cannot_gain_elevated_role_during_session(self):
+        from app import create_app
+        from app.models import Role
+        subject='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
+        identity=bound_dev_uuid(subject,self.bindings)
+        with patch.dict(os.environ,self.dev_env()):app=create_app()
+        c=app.test_client()
+        with c.session_transaction() as session:
+            session.update(oidc_sub=subject,oidc_access_token='synthetic-token',oidc_expires_at=time.time()+200)
+        with patch('app.oidc_dev.current_user') as user,patch('app.oidc_dev.requests.get') as get,patch('app.oidc_dev.requests.post'):
+            user.is_authenticated=True;user.id=identity;user.role=Role.ADMIN
+            get.return_value.json.return_value={'sub':subject,'carte_fede_uuid':identity,'carte_fede_dev_allowed':True}
+            self.assertEqual(c.get('/api/admin/users').status_code,401)
     def test_pkce_state_nonce_and_no_open_redirect(self):
         from app import create_app
         with patch.dict(os.environ,self.dev_env()):app=create_app()

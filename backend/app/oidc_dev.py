@@ -126,7 +126,7 @@ def init_dev_oidc(app):
                 timeout=8, allow_redirects=False)
             r.raise_for_status()
             info = r.json()
-            if info.get("sub") != session.get("oidc_sub") or info.get("carte_fede_dev_allowed") is not True or bound_dev_uuid(info.get("sub"), mapping) != info.get("carte_fede_uuid") or str(current_user.id) != info.get("carte_fede_uuid") or current_user.role == Role.ATTENTE:
+            if info.get("sub") != session.get("oidc_sub") or info.get("carte_fede_dev_allowed") is not True or bound_dev_uuid(info.get("sub"), mapping) != info.get("carte_fede_uuid") or str(current_user.id) != info.get("carte_fede_uuid") or current_user.role == Role.ATTENTE or (info.get("sub") not in mapping and current_user.role != Role.MEMBER):
                 raise ValueError("Identity no longer authorized")
         except (ValueError, KeyError, requests.RequestException):
             revoke_and_clear()
