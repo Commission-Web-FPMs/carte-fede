@@ -55,6 +55,13 @@ class OIDCSecurity(unittest.TestCase):
         with patch.dict(os.environ,dict(self.dev_env(),DATABASE_URL='postgresql+psycopg://carte_fede_main:synthetic@localhost/carte_fede_main',AUTO_CREATE_DB='1')),patch('app.db.create_all') as create:
             with self.assertRaises(RuntimeError):create_app()
             create.assert_not_called()
+    def test_synthetic_initializer_refuses_production_copy_before_sql(self):
+        import runpy
+        from pathlib import Path
+        with patch.dict(os.environ,dict(self.dev_env(),DEV_DATA_MODE='production_copy')),patch('app.create_app') as create:
+            with self.assertRaisesRegex(AssertionError,'Synthetic initialization forbidden'):
+                runpy.run_path(str(Path(__file__).resolve().parents[1]/'scripts/init_dev_data.py'))
+            create.assert_not_called()
     def test_public_dev_cannot_fall_back_to_local_auth(self):
         from app import create_app
         with patch.dict(os.environ,dict(self.dev_env(),AUTH_MODE='flask')),self.assertRaises(RuntimeError):create_app()

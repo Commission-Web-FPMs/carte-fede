@@ -6,6 +6,7 @@ from sqlalchemy.engine import make_url
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 u=make_url(os.environ["DATABASE_URL"])
 assert os.environ.get("APP_ENV")=="development" and u.database=="carte_fede_dev" and u.username=="carte_fede_dev", "DEV database/role required before SQL"
+assert os.environ.get("DEV_DATA_MODE", "synthetic") == "synthetic", "Synthetic initialization forbidden with a production copy, before SQL"
 from app import create_app
 from app.models import db, User, Role, Membership, PendingRegistration, CardPaymentSettings
 p=argparse.ArgumentParser();p.add_argument("--reset-synthetic-dev",action="store_true");a=p.parse_args()

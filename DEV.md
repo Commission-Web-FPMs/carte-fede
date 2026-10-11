@@ -1,41 +1,29 @@
-# Carte Fédé DEV — develop uniquement
+# Carte Fédé DEV
 
-Environnement `https://carte-dev.fede.fpms.ac.be`, namespace `carte-fede-dev`, rôle et base `carte_fede_dev` sur PG18 ICU déterministe en-US. Production suit `main`, ses images et son namespace ; ne pas fusionner automatiquement les valeurs/chart DEV ni les réglages OIDC vers main.
+DEV est public sur https://carte-dev.fede.fpms.ac.be, avec authentification OIDC. La production main conserve Flask. La base/rôle dédiés carte_fede_dev utilisent PostgreSQL18, UTF8 et ICU déterministe en-US. Le frontend public ne donne aucun accès anonyme aux données métier.
 
-## Publication
+## Identité et permissions
 
-Le workflow de develop exécute les tests confidentialité/OIDC et la recette PostgreSQL18 jetable, compile le frontend, publie uniquement `ghcr.io/commission-web-fpms/carte-fede-dev:<SHA40>` et `carte-fede-dev-frontend:<SHA40>`, puis met à jour exclusivement `develop` de carte-fede-deployment. Aucun tag latest, aucun push main. GitOps suit la branche chart develop ; synchronisation automatique normale, aucune commande Argo forcée.
+Authentik gère exclusivement l'identité et l'authentification. Les groupes, notamment membres, servent au contrôle d'accès et ne déterminent jamais les rôles métier. ADMIN Carte Fédé ne confère aucun privilège administratif Authentik. Aucun rôle Carte Fédé n'est synchronisé vers Authentik.
 
-`AUTH_MODE=oidc` exige `APP_ENV=development`, base/rôle carte_fede_dev et issuer/client/origin DEV exacts. La branche stable main reste Flask. Les secrets DEV sont indépendants, SealedSecrets strictement liés au namespace/nom, avec récupération locale AES256 hors Git. Les comptes synthétiques et mots de passe ne doivent pas être affichés dans un terminal ou déposés dans Git ; les credentials sont disponibles dans l'archive chiffrée de récupération opérateur.
+Le backend vérifie RS256, issuer DEV exact, audience/client, exp/iat/azp, nonce, state et PKCE. Un mapping privé vérifié associe sub à l'UUID métier, dans le périmètre de cet issuer exact. Le claim UUID doit correspondre au mapping et à un utilisateur existant en PostgreSQL. Aucun rapprochement par email, nom ou matricule, aucune création automatique MEMBER. Un utilisateur Authentik actif sans association vérifiée est refusé. Les comptes désactivés et rôles ATTENTE sont refusés.
 
-## Identités et sessions
+Les rôles ADMIN, VERIFIER et MEMBER proviennent exclusivement de PostgreSQL, rechargés à chaque requête. Le backend contrôle les endpoints sensibles : administration ADMIN uniquement, vérification des cartes ADMIN/VERIFIER, données personnelles du compte authentifié. L'administrateur peut modifier les rôles avec les fonctionnalités existantes ; promotion, rétrogradation et mise en attente prennent effet pendant les sessions existantes. Toutes ces écritures restent dans carte_fede_dev.
 
-Groupe Authentik `carte-fede-dev-testers`, sans rôle Authentik/superuser/parent. Quatre comptes synthétiques : admin/verifier/member actifs, attente désactivé. Les UUID Authentik et métier synthétiques sont distincts ; sub_mode user_uuid. Le secret contient un mapping autoritaire fixe sub→UUID, associé à l'issuer DEV exact. Aucune adoption par email/identifiant, aucune création utilisateur au premier login ; un claim changé reste refusé même signé. Les rôles métier viennent uniquement de PostgreSQL.
+La politique Authentik DEV accepte les identités actives ; elle ne remplace pas le contrôle d'association métier du backend. Les inscriptions non validées importées dans default restent désactivées. Les anciens comptes de recette synthétiques restent présents dans Authentik, mais n'ont plus de profil métier après la copie PROD et sont refusés.
 
-Authorization Code, PKCE S256, state/nonce uniques à usage unique, callback HTTPS strict ; signatures RS256 et issuer/audience/exp/iat/azp vérifiés. Cookies __Host-carte-fede-dev Secure/HttpOnly/SameSite=Lax ; tokens uniquement dans des sessions serveur éphémères privées, aucun localStorage/cookie/JWT d'accès lisible. Une réinstallation invalide ces sessions. Userinfo à chaque requête vérifie l'activation et le groupe DEV ; défaillance Authentik ferme l'accès. Session cinq minutes au maximum, pas de refresh_token. Logout local révoque le token ; un SSO Authentik encore actif permet une nouvelle connexion explicite.
+## Données et sécurité
 
-Toutes les API métier et /verify requièrent une identité DEV. Origin exact exigé pour les écritures. Authentification Flask locale, inscriptions ouvertes, resets/passwords locaux bloqués en mode OIDC DEV. Frontend public et page de login publics ; aucune donnée métier publique. Rate limit dédié sur login/callback et protections NPM-only.
+La copie réelle PROD → DEV du11 octobre2026 a été explicitement autorisée. Snapshot cohérent chiffré, production en lecture seule, DEV fermé et à zéro réplique pendant la restauration transactionnelle. Comparaison de toutes les lignes des neuf tables, UUID, hashes, cartes, relations et rôles. Les rôles d'origine sont conservés, dont ADMIN pour230466. Les sauvegardes et mappings privés sont chiffrés hors Git ; ne jamais publier les données ou leurs archives déchiffrées.
 
-## Données synthétiques / sécurité externe
+DEV_DATA_MODE=production_copy, devInitialization.enabled=false, AUTO_CREATE_DB=0. Le script synthétique refuse ce mode avant tout SQL, y compris --reset-synthetic-dev. Aucune réinitialisation synthétique autorisée sur cette copie. Une nouvelle copie nécessite fermeture DEV, arrêt des writers DEV, sauvegarde chiffrée préalable et validation du mapping autoritaire.
 
-Initialisation PreSync `python scripts/init_dev_data.py` idempotente, guards vérifiés avant tout SQL et current_database/current_user vérifiés avant création du schéma. Neuf tables métier, quatre utilisateurs, trois cartes, une inscription pending ; aucun import/dump de production. SMTP délibérément ignoré sans logs de contenu ; aucun credential SMTP. Toutes les API paiement et configuration bancaire interdites, IBAN/BIC vides, montant nul. NetworkPolicy ingress seulement Traefik et egress uniquement DNS, PostgreSQL et HTTPS NPM/Authentik ; aucune sortie SMTP/banque.
+Les paiements et réglages bancaires sont refusés par le backend, même si leur configuration est présente dans la copie intégrale. SMTP est neutralisé en DEV et interdit par NetworkPolicy. Authentification locale, inscription et reset locaux sont bloqués. Origin HTTPS DEV exact exigé pour les écritures. Sessions serveur privées cinq minutes, cookies __Host Secure/HttpOnly/SameSite=Lax, userinfo à chaque requête, logout avec révocation du token. Une panne Authentik ferme l'accès.
 
-Une remise à zéro efface uniquement DEV et requiert un choix explicite :
+## Publication, validation et rollback
 
-```bash
-kubectl --context comweb-k8s-dev -n carte-fede-dev exec deployment/carte-fede-dev -- python scripts/init_dev_data.py --reset-synthetic-dev
-```
+develop publie des images DEV à SHA immutable et met à jour seulement develop du chart. Main, NPM production et les ressources PostgreSQL/Authentik de production restent inchangés. Argo réconcilie normalement, sans synchronisation globale forcée.
 
-Ne pas exécuter contre un autre namespace ni effectuer de rapprochement automatique d'inscriptions validées avec un compte Authentik existant. Pour tester une nouvelle association, ajouter explicitement le compte synthétique et son binding vérifié ; l'état ATTENTE et la désactivation doivent rester refusés.
+Recette : signatures/claims forgés, identités sans mapping, attente/désactivation, refus anonymes, permissions positives/négatives des trois rôles et promotion/rétrogradation pendant session. Les tests de rôle utilisant des fixtures ont été réalisés avant la copie ; aucune identité synthétique ne doit être associée à une personne réelle pour tester.
 
-## Validation et rollback
-
-Tests unitaires JWT/claims/signature/state/PKCE/DB guard, tests de confidentialité, requêtes réelles login/logout/401/403/rôles/attente/session désactivée, absence d'emails/paiements. Surveiller CNPG3/3, trois nœuds Ready, Argo Healthy, aucune modification des Deployments/credentials/providers/comptes de production ; les écritures légitimes de production peuvent continuer.
-
-Rollback de code : mettre une version SHA déjà validée dans develop du chart puis laisser Argo réconcilier. Une nouvelle publication applicative produit une nouvelle SHA et ne doit pas réutiliser un tag. En urgence fermer uniquement l'hôte NPM DEV par le guard opérateur ; garder toutes les ressources historiques et bases. Annulation des changements Traefik uniquement après fermeture DEV, revert de l'ajout du namespace (maxUnavailable0), sondes production vérifiées. Ne jamais restaurer globalement PostgreSQL/Authentik/NPM pour annuler DEV ; ne jamais modifier un hôte NPM de production. Les Database/DatabaseRole sont retain et protégés Prune=false/Delete=false. Aucun finalizer de suppression cascaded d'Application ajouté. Aucune bascule OIDC de production autorisée par DEV.
-
-Tous les comptes Authentik actifs peuvent accéder à DEV. Leur profil local est créé au premier login avec un UUID DEV déterministe lié au sub signé, un nom générique, une adresse pseudonyme dev.invalid et le rôle MEMBER seulement. Aucun nom/email/matricule/carte/rôle de production copié. Les comptes désactivés restent refusés. Les quatre fixtures conservent leur mapping et leurs rôles de recette ; retirer leur groupe ne révoque plus l’accès, la désactivation le révoque toujours.
-
-## Architecture autoritaire — remplace la création automatique MEMBER
-
-Authentik fournit exclusivement l’identité/authentification. Issuer exact et sub sont associés uniquement par mapping privé vérifié à un UUID déjà présent dans PostgreSQL Carte Fédé. Aucun profil automatique, aucun rapprochement par nom/email/matricule. Les rôles ADMIN/VERIFIER/MEMBER sont chargés de PostgreSQL à chaque requête et gérés uniquement par les endpoints backend administrateur existants ; les groupes/claims de rôle OIDC ne confèrent aucun rôle métier ni privilège Authentik. ATTENTE/inactif/sans mapping refusés. Vérification de carte DEV réservée à ADMIN/VERIFIER. La copie PROD→DEV exige snapshot chiffré, comparaison complète des lignes et rôles (dont230466 ADMIN), arrêt des écritures DEV, PreSync synthétique désactivé et nouveau mapping vérifié. Emails/paiements neutralisés, source/main inchangés.
+Incident : fermer uniquement DEV via son guard NPM, remettre ses deux Deployments à zéro via chart develop, puis diagnostiquer. Ne jamais revenir à une image d'auto-provisionnement MEMBER avec les données réelles. Pour annuler la copie, restaurer uniquement la sauvegarde DEV préalable chiffrée, remettre son ancien mapping vérifié et une image compatible, puis refaire la recette avant ouverture. Ne jamais restaurer globalement Authentik/NPM/PostgreSQL. Conserver les archives et laboratoires ; aucune suppression automatique des bases retain.
