@@ -3,11 +3,12 @@ from flask_login import login_required, current_user
 from werkzeug.security import generate_password_hash
 from sqlalchemy.orm import joinedload
 from .models import db, User, Role, Membership, PendingRegistration, PendingCardRequest, CardPaymentSettings, Room, VoteSession, VoteOption, VoteBallot
-from .card_payment import parse_settings, public_settings, settings
+from .card_payment import parse_settings, public_settings, settings, development_payment
 from .routes_memberships import next_available_card_code, ALLOWED_PREFIXES, current_academic_year
 from sqlalchemy.exc import IntegrityError
 from datetime import datetime, timedelta
 import re
+import requests
 
 bp_admin = Blueprint("admin", __name__)
 
@@ -43,17 +44,20 @@ def _session_to_dict(session: VoteSession):
         "options": [{"id": o.id, "text": o.text} for o in (session.options or [])],
     }
 
-@bp_admin.route("/api/admin/card-payment", methods=["GET", "PUT"])
+@bp_admin.route("/api/admin/card-payment", methods=["GET", "PUT", "PATCH"])
 def card_payment_settings():
     if request.method == "GET":
         return jsonify(public_settings())
+    if request.method == "PATCH" and not development_payment():return jsonify(error="Method not allowed"),405
     try:
-        beneficiary, iban, bic, amount, prefix = parse_settings(request.get_json(silent=True))
+        data=request.get_json(silent=True)
+        if request.method == "PATCH" and isinstance(data,dict):data={**public_settings(),**data}
+        beneficiary, iban, bic, amount, prefix = parse_settings(data)
     except ValueError as error:
         return jsonify({"error": str(error)}), 400
-    row = settings()
+    row = db.session.get(CardPaymentSettings, 2) if development_payment() else settings()
     if row is None:
-        row = CardPaymentSettings(id=1)
+        row = CardPaymentSettings(id=2 if development_payment() else 1)
         db.session.add(row)
     row.beneficiary = beneficiary
     row.iban = iban
@@ -62,6 +66,12 @@ def card_payment_settings():
     row.communication_prefix = prefix
     db.session.commit()
     return jsonify(public_settings())
+
+def _identity_state(pending_id):
+    if not development_payment():return "legacy"
+    from .models import DevIdentityBinding
+    b=DevIdentityBinding.query.filter_by(pending_id=pending_id).first()
+    return b.state if b else "historical-unverified"
 
 @bp_admin.get("/api/admin/requests")
 def pending_requests():
@@ -75,7 +85,7 @@ def pending_requests():
     return jsonify({
         "registrations": [{"id": row.id, "nom": row.nom, "prenom": row.prenom,
                            "member_id": row.member_id, "email": row.email, "created_at": row.created_at.isoformat(),
-                           "expires_at": row.expires_at.isoformat(), "free_card_requested": row.free_card_requested} for row in registrations],
+                           "expires_at": row.expires_at.isoformat(), "free_card_requested": row.free_card_requested, "identity_state": _identity_state(row.id)} for row in registrations],
         "cards": [{"id": row.id, "annee": row.annee, "nom": row.user.nom,
                    "prenom": row.user.prenom, "identifiant": row.user.member_id or row.user.email,
                    "created_at": row.created_at.isoformat(), "status": row.status,
@@ -88,8 +98,23 @@ def decide_registration(request_id, decision):
     if decision not in ("approve", "reject"):
         return jsonify({"error": "Décision invalide."}), 404
     row = PendingRegistration.query.filter_by(id=request_id).first()
+    if development_payment() and not row:
+        from .models import DevIdentityBinding
+        old=DevIdentityBinding.query.filter_by(request_id=request_id).first()
+        if old and old.state in ['approved','rejected']:
+            return jsonify(ok=True,state=old.state,user_id=old.user_id)
     if not row or row.expires_at <= datetime.utcnow():
         return jsonify({"error": "Demande expirée ou introuvable."}), 404
+    if development_payment():
+        from .dev_registration import decide, RegistrationError, fail
+        try:
+            return jsonify(decide(row,decision,request.get_json(silent=True) or {}))
+        except RegistrationError as error:
+            return fail(error)
+        except IntegrityError:
+            return fail(RegistrationError("Conflit concurrent ; demande conservée pour reprise."))
+        except requests.RequestException:
+            return fail(RegistrationError("Identité indisponible ; reprise possible.",503))
     if decision == "reject":
         db.session.delete(row)
         db.session.commit()
@@ -169,6 +194,8 @@ def decide_card_request(request_id, decision):
 @login_required
 def users_collection():
     if request.method == "POST":
+        if development_payment():
+            return jsonify({"error": "Création via le parcours Authentik, sans mot de passe local.", "enrollment_url": "https://auth.fede.fpms.ac.be/if/flow/carte-fede-dev-enrollment/"}), 409
         data = request.json or {}
         nom = (data.get("nom") or "").strip()
         prenom = (data.get("prenom") or "").strip()

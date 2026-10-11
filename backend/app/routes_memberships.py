@@ -206,7 +206,7 @@ def _qr_serializer():
     # token signé avec la SECRET_KEY
     return URLSafeTimedSerializer(
         secret_key=current_app.config["SECRET_KEY"],
-        salt="qr-token-v1"
+        salt="qr-token-dev-v1" if current_app.config.get("DEV_OIDC") else "qr-token-v1"
     )
 
 def _abs_host():
@@ -231,6 +231,8 @@ def qr_png_for_year(annee: int):
         "annee": row.annee,
         "annee_code": row.annee_code,
     }
+    if current_app.config.get("DEV_OIDC"):
+        payload["environment"] = "development"
     # token valable 400 jours (exemple)
     token = s.dumps(payload)
 
@@ -266,12 +268,16 @@ def api_verify():
     if not row:
         return jsonify({"valid": False, "reason": "card-not-found"}), 404
 
+    if current_app.config.get("DEV_OIDC") and data.get("environment") != "development":
+        return jsonify({"valid": False, "reason": "wrong-environment"}), 400
+
     if row.annee_code != data.get("annee_code"):
         return jsonify({"valid": False, "reason": "code-mismatch"}), 400
 
     # OK
     return jsonify({
         "valid": True,
+        "test_mode": bool(current_app.config.get("DEV_OIDC")),
         "user": {"nom": u.nom, "prenom": u.prenom},
         "annee": row.annee,
         "periode": f"{row.annee}-{row.annee+1}",
@@ -291,11 +297,16 @@ def human_verify_page():
         else:
             data, status = resp, 200
         j = data.get_json()
+    if current_app.config.get("DEV_OIDC"):
+        from html import escape
+        for key in ['periode','code','reason']:
+            if key in j:j[key]=escape(str(j[key]))
+        if 'user' in j:j['user']={key:escape(str(value)) for key,value in j['user'].items()}
     ok = j.get("valid")
     if ok:
         return f"""
 <!doctype html><meta charset="utf-8">
-<h1>Carte valide ✅</h1>
+<h1>{"TEST DEV — " if current_app.config.get("DEV_OIDC") else ""}Carte valide ✅</h1>
 <p><strong>{j['user']['prenom']} {j['user']['nom']}</strong></p>
 <p>Période : {j['periode']}<br>Code : {j['code']}</p>
 """, 200

@@ -1,6 +1,8 @@
 from decimal import Decimal, InvalidOperation
 from io import BytesIO
 import re
+import os
+from types import SimpleNamespace
 
 import qrcode
 from flask import Blueprint, jsonify, request, send_file
@@ -12,7 +14,18 @@ from .routes_memberships import current_academic_year
 bp_payment = Blueprint("card_payment", __name__)
 
 
+DEMO_IBAN = "DE36000000000000000000"  # checksum valid; bank/account all zero, no real destination
+
+def development_payment():
+    return os.getenv("APP_ENV") == "development" and os.getenv("AUTH_MODE") == "oidc"
+
 def settings():
+    if development_payment():
+        row = db.session.get(CardPaymentSettings, 2)
+        if row:
+            # Fail closed even if someone edits DEV SQL to real bank details.
+            return SimpleNamespace(beneficiary=row.beneficiary, iban=DEMO_IBAN, bic="", amount=row.amount, communication_prefix=row.communication_prefix)
+        return SimpleNamespace(beneficiary="TEST Carte Fede DEV", iban=DEMO_IBAN, bic="", amount=Decimal("0.01"), communication_prefix="TEST SANS PAIEMENT")
     return db.session.get(CardPaymentSettings, 1)
 
 
@@ -20,6 +33,7 @@ def public_settings():
     row = settings()
     return {
         "annee": current_academic_year(),
+        "test_mode": development_payment(),
         "beneficiary": row.beneficiary if row else "",
         "iban": row.iban if row else "",
         "bic": row.bic if row else "",
@@ -57,6 +71,11 @@ def parse_settings(data):
         raise ValueError("Montant invalide.") from None
     if not amount.is_finite() or amount < Decimal("0.01") or amount > Decimal("99999999.99") or amount.as_tuple().exponent < -2:
         raise ValueError("Le montant doit être positif, en euros, avec deux décimales maximum.")
+    if development_payment():
+        if iban != DEMO_IBAN or bic:
+            raise ValueError("DEV : seul l’IBAN fictif affiché est accepté, BIC vide.")
+        if not beneficiary.startswith("TEST ") or not prefix.startswith("TEST "):
+            raise ValueError("DEV : bénéficiaire et communication doivent commencer par TEST.")
     return beneficiary, iban, bic, amount, prefix
 
 
@@ -69,6 +88,8 @@ def epc_payload(row, communication):
 def get_card_payment():
     response = jsonify(public_settings())
     response.headers["Cache-Control"] = "no-store"
+    if development_payment():
+        response.headers["X-Carte-Fede-Test"] = "non-payable-demo"
     return response
 
 
@@ -80,6 +101,8 @@ def payment_qr():
     data = request.get_json(silent=True) or {}
     if not isinstance(data, dict):
         return jsonify({"error": "Données invalides."}), 400
+    if development_payment():
+        data.setdefault("nom","TEST");data.setdefault("prenom","DEMO")
     nom = data.get("nom") or (current_user.nom if current_user.is_authenticated else "")
     prenom = data.get("prenom") or (current_user.prenom if current_user.is_authenticated else "")
     if not isinstance(nom, str) or not isinstance(prenom, str) or not nom.strip() or not prenom.strip():
@@ -87,7 +110,9 @@ def payment_qr():
     year = data.get("annee", current_academic_year())
     if type(year) is not int or year not in (current_academic_year(), current_academic_year() + 1):
         return jsonify({"error": "Année académique invalide."}), 400
-    communication = f"{nom.strip().upper()} {prenom.strip()} – {row.communication_prefix} {year}-{year + 1}"
+    # Never encode copied personal names into a demonstration payment QR.
+    communication = (f"TEST DEMO – {row.communication_prefix} {year}-{year + 1}" if development_payment()
+                     else f"{nom.strip().upper()} {prenom.strip()} – {row.communication_prefix} {year}-{year + 1}")
     if len(communication) > 140 or re.search(r"[\x00-\x1f\x7f]", communication):
         return jsonify({"error": "Communication trop longue ou invalide."}), 400
     payload = epc_payload(row, communication)
@@ -103,4 +128,6 @@ def payment_qr():
     output.seek(0)
     response = send_file(output, mimetype="image/png")
     response.headers["Cache-Control"] = "no-store"
+    if development_payment():
+        response.headers["X-Carte-Fede-Test"] = "non-payable-demo"
     return response

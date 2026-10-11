@@ -92,6 +92,9 @@ def create_app():
     if os.getenv("AUTH_MODE", "flask") == "oidc":
         from .oidc_dev import init_dev_oidc
         init_dev_oidc(app)
+        if os.getenv("DEV_REGISTRATION_ENABLED") == "1":
+            from .dev_registration import bp
+            app.register_blueprint(bp)
 
     # Auto-create tables only when explicitly enabled (avoid touching existing DBs)
     if os.getenv("AUTO_CREATE_DB", "").lower() in ("1", "true", "yes"):

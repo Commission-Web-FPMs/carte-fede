@@ -46,7 +46,9 @@ jobs:
           DATABASE_URL: postgresql+psycopg://postgres:postgres@127.0.0.1:15432/carte_fede_ci
           SECRET_KEY: synthetic-ci-only-not-production
           AUTO_CREATE_DB: '1'
-        run: python -m unittest discover -s tests -p 'test_requests.py' -v
+        run: |
+          python -m unittest discover -s tests -p 'test_requests.py' -v
+          python -m unittest discover -s tests -p 'test_dev_flows.py' -v
       - uses: actions/setup-node@v4
         with:
           node-version: '22'

@@ -38,12 +38,17 @@ import Layout from "../../layouts/Layout.astro";
       if (!response.ok) throw new Error("Chargement impossible.");
       const data = await response.json();
       for (const field of fields) (form.elements.namedItem(field) as HTMLInputElement).value = data[field] || "";
+      if (data.test_mode) {
+        message.textContent = "TEST — coordonnées fictives, aucun paiement réel. L’IBAN est verrouillé.";
+        (form.elements.namedItem("iban") as HTMLInputElement).readOnly = true;
+        (form.elements.namedItem("bic") as HTMLInputElement).readOnly = true;
+      }
       year.textContent = `${data.annee}-${data.annee + 1}`;
       example.textContent = data.communication_prefix || "Carte Fédé";
       form.hidden = false;
       form.classList.remove("hidden");
       form.classList.add("grid");
-      message.textContent = "";
+      if (!data.test_mode) message.textContent = "";
     } catch { message.textContent = "Impossible de charger les paramètres. Rechargez la page."; message.className = "mt-4 text-sm text-red-700"; }
   }
   void load();

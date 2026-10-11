@@ -134,3 +134,16 @@ class VoteBallot(db.Model):
     __table_args__ = (
         db.UniqueConstraint("session_id", "voter_token", name="uq_vote_once_per_session"),
     )
+
+class DevIdentityBinding(db.Model):
+    """DEV-only identity approval journal; no passwords, no role synchronization."""
+    __tablename__ = "dev_identity_binding"
+    issuer = db.Column(db.String(255), primary_key=True)
+    subject = db.Column(db.String(36), primary_key=True)
+    user_id = db.Column(db.String, db.ForeignKey("user.id", ondelete="SET NULL"), unique=True)
+    pending_id = db.Column(db.String, db.ForeignKey("pending_registration.id", ondelete="SET NULL"), unique=True)
+    request_id = db.Column(db.String(36), nullable=False, unique=True)
+    auth_user_pk = db.Column(db.Integer)
+    managed = db.Column(db.Boolean, nullable=False, default=False)
+    state = db.Column(db.String(16), nullable=False, default="pending")
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)

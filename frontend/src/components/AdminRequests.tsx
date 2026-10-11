@@ -13,6 +13,7 @@ type Registration = {
   email: string | null;
   expires_at: string;
   free_card_requested: boolean;
+  identity_state?: string;
 };
 type CardRequest = {
   id: string;
@@ -142,11 +143,12 @@ export default function AdminRequests({
                   <p className="mt-2 text-sm font-medium text-blue-900">
                     {item.free_card_requested ? "Carte gratuite BAC1 Polytech demandée : à examiner après validation du compte." : "Carte : paiement requis après validation du compte."}
                   </p>
+                  {(item.identity_state==='historical' || item.identity_state==='historical-unverified') && <p className="mt-2 text-sm text-amber-800">Identité historique partagée : activation opérateur séparée, aucune approbation automatique DEV.</p>}
                   <div className="mt-3 flex flex-wrap gap-2">
                       <button
                         type="button"
                         className="admin-button admin-primary"
-                        disabled={!!busy}
+                        disabled={!!busy || item.identity_state==='historical' || item.identity_state==='historical-unverified'}
                         onClick={() => void decide("registrations", item.id, "approve")}
                       >
                         {busy === item.id ? "Validation…" : "Valider le compte"}

@@ -34,7 +34,7 @@ def get_dev_user(subject, mapping):
     return db.session.get(User, identity, populate_existing=True)
 
 
-def verify_claims(encoded, key, issuer, audience, nonce, mapping):
+def verify_claims(encoded, key, issuer, audience, nonce, mapping, registration=False):
     claims = jwt.decode(encoded, key, algorithms=["RS256"], issuer=issuer,
         audience=audience, options={"require": ["iss", "sub", "aud", "exp", "iat", "nonce"]})
     if not isinstance(claims.get("nonce"), str) or not hmac.compare_digest(claims["nonce"], nonce):
@@ -43,7 +43,7 @@ def verify_claims(encoded, key, issuer, audience, nonce, mapping):
         raise ValueError("OIDC authorized party mismatch")
     if isinstance(claims["aud"], list) and len(claims["aud"]) > 1 and claims.get("azp") != audience:
         raise ValueError("OIDC authorized party required")
-    if bound_dev_uuid(claims["sub"], mapping) != claims.get("carte_fede_uuid"):
+    if not registration and bound_dev_uuid(claims["sub"], mapping) != claims.get("carte_fede_uuid") and not (not claims.get("carte_fede_uuid") and getattr(mapping,"allows_empty_claim",lambda s:False)(claims["sub"])):
         raise ValueError("Authoritative identity binding mismatch")
     if claims.get("carte_fede_dev_allowed") is not True:
         raise ValueError("Active DEV identity required")
@@ -51,6 +51,7 @@ def verify_claims(encoded, key, issuer, audience, nonce, mapping):
 
 
 def init_dev_oidc(app):
+    app.config["DEV_OIDC"] = True
     uri = make_url(app.config["SQLALCHEMY_DATABASE_URI"])
     if os.getenv("APP_ENV") != "development" or uri.database != "carte_fede_dev" or uri.username != "carte_fede_dev":
         raise RuntimeError("DEV OIDC requires its dedicated database and role")
@@ -61,7 +62,17 @@ def init_dev_oidc(app):
     client_id, client_secret = os.environ["OIDC_CLIENT_ID"], os.environ["OIDC_CLIENT_SECRET"]
     if client_id != "carte-fede-dev":
         raise RuntimeError("Unexpected DEV client")
-    mapping = json.loads(os.environ["OIDC_IDENTITY_BINDINGS"])
+    class IdentityMap(dict):
+        def get(self, subject, default=None):
+            value=super().get(subject)
+            if value:return value
+            from .dev_registration import bound_identity
+            return bound_identity(subject) or default
+        def allows_empty_claim(self, subject):
+            from .dev_registration import identity_binding
+            b=identity_binding(subject)
+            return bool(b and b.state=='approved' and not b.managed)
+    mapping = IdentityMap(json.loads(os.environ["OIDC_IDENTITY_BINDINGS"]))
     if not isinstance(mapping, dict) or not mapping:
         raise RuntimeError("Authoritative DEV bindings required")
     root = "https://auth.fede.fpms.ac.be"
@@ -91,10 +102,12 @@ def init_dev_oidc(app):
             return None
         if request.path == "/api/auth/mode":
             return jsonify({"mode": "oidc", "development": True})
-        if request.path in {"/api/auth/oidc/login", "/api/auth/oidc/callback"}:
+        if request.path in {"/api/card-payment", "/api/card-payment/qr"}:
+            if request.method not in {"GET", "HEAD", "OPTIONS"} and request.headers.get("Origin") != origin:
+                return jsonify({"error": "invalid_origin"}), 403
             return None
-        if request.path.startswith(("/api/card-payment", "/api/admin/card-payment")):
-            return jsonify({"error": "payments_disabled_in_development"}), 403
+        if request.path in {"/api/auth/oidc/login", "/api/auth/oidc/callback", "/api/dev/registration", "/api/dev/enrollment-hook"}:
+            return None
         if request.path in {"/api/auth/login", "/api/auth/register"} or "password" in request.path.lower():
             return jsonify({"error": "local_auth_disabled_in_oidc_development"}), 403
         if not current_user.is_authenticated:
@@ -108,7 +121,7 @@ def init_dev_oidc(app):
                 timeout=8, allow_redirects=False)
             r.raise_for_status()
             info = r.json()
-            if info.get("sub") != session.get("oidc_sub") or info.get("carte_fede_dev_allowed") is not True or bound_dev_uuid(info.get("sub"), mapping) != info.get("carte_fede_uuid") or str(current_user.id) != info.get("carte_fede_uuid") or current_user.role == Role.ATTENTE:
+            if info.get("sub") != session.get("oidc_sub") or info.get("carte_fede_dev_allowed") is not True or (bound_dev_uuid(info.get("sub"), mapping) != info.get("carte_fede_uuid") and not (not info.get("carte_fede_uuid") and mapping.allows_empty_claim(info.get("sub")))) or str(current_user.id) != bound_dev_uuid(info.get("sub"),mapping) or current_user.role == Role.ATTENTE:
                 raise ValueError("Identity no longer authorized")
         except (ValueError, KeyError, requests.RequestException):
             revoke_and_clear()
@@ -128,6 +141,7 @@ def init_dev_oidc(app):
         session["oidc_nonce"] = secrets.token_urlsafe(32)
         session["oidc_verifier"] = secrets.token_urlsafe(48)
         session["oidc_started"] = time.time()
+        session["oidc_registration"] = request.args.get("registration") == "1" and os.getenv("DEV_REGISTRATION_ENABLED") == "1"
         next_path = request.args.get("next", "/")
         parsed = urlsplit(next_path)
         session["oidc_next"] = next_path if next_path.startswith("/") and not next_path.startswith("//") and not parsed.netloc and not parsed.scheme and "\\" not in next_path else "/"
@@ -143,6 +157,7 @@ def init_dev_oidc(app):
         nonce = session.pop("oidc_nonce", "")
         verifier = session.pop("oidc_verifier", "")
         started = session.pop("oidc_started", 0)
+        registration = session.pop("oidc_registration", False)
         target = session.pop("oidc_next", "/")
         try:
             if not state or not nonce or not verifier or time.time() - started > 300 or not hmac.compare_digest(state, request.args.get("state", "")) or not request.args.get("code") or "error" in request.args:
@@ -153,7 +168,12 @@ def init_dev_oidc(app):
             r.raise_for_status()
             token = r.json()
             claims = verify_claims(token["id_token"], jwks.get_signing_key_from_jwt(token["id_token"]).key,
-                issuer, client_id, nonce, mapping)
+                issuer, client_id, nonce, mapping, registration=registration)
+            if registration:
+                session.clear()
+                app.session_interface.regenerate(session)
+                session.update(registration_subject=claims["sub"],registration_token=token["access_token"],registration_expires=min(claims["exp"],time.time()+300))
+                return redirect(origin+"/register/?authenticated=1")
             user = get_dev_user(claims["sub"], mapping)
             if not user or user.role == Role.ATTENTE:
                 raise ValueError("No authorized local identity")

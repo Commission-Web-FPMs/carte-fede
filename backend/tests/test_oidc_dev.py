@@ -71,7 +71,7 @@ class OIDCSecurity(unittest.TestCase):
         client=app.test_client()
         for path in ['/api/me','/api/admin/users','/verify']:
             self.assertEqual(client.get(path).status_code,401)
-        for path in ['/api/auth/login','/api/auth/register','/api/card-payment/qr']:
+        for path in ['/api/auth/login','/api/auth/register']:
             self.assertEqual(client.post(path).status_code,403)
     def test_database_roles_and_session_role_changes(self):
         from app import create_app
