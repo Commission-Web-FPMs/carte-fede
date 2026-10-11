@@ -117,6 +117,13 @@ def decide(row, decision, data):
         u=api_user(b.auth_user_pk,{'attributes':attrs,'groups':groups,'is_active':True});verify_owned(b,u)
         if not u.get('is_active') or os.environ['DEV_MEMBERS_GROUP'] not in u.get('groups',[]) or u['attributes'].get('carte_fede_dev_business_uuid') != b.user_id:raise RegistrationError('Activation non confirmée ; reprise requise.',503)
     # Existing identities are never patched: OIDC attestation and local binding suffice.
+    # The durable activating commit released the first lock. Serialize finalization
+    # again after the remote operation, including different-year approval retries.
+    subject=b.subject
+    db.session.expire_all()
+    b=DevIdentityBinding.query.filter_by(issuer=ISSUER,subject=subject).populate_existing().with_for_update().one()
+    if b.state=='approved':return {'ok':True,'user_id':b.user_id,'state':'approved'}
+    if b.state!='activating':raise RegistrationError('État modifié ; intervention opérateur requise.')
     user=db.session.get(User,b.user_id);user.role=Role.MEMBER
     if add_card and not Membership.query.filter_by(user_id=user.id,annee=year).first():db.session.add(Membership(user_id=user.id,annee=year,annee_code=next_available_card_code(year,prefix)))
     elif not add_card and not PendingCardRequest.query.filter_by(user_id=user.id,annee=row.card_year or current_academic_year()).first():db.session.add(PendingCardRequest(user_id=user.id,annee=row.card_year or current_academic_year(),status='pending' if row.free_card_requested else 'payment_required',free_card=row.free_card_requested))

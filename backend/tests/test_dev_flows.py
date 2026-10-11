@@ -156,3 +156,22 @@ class DevFlows(unittest.TestCase):
   with ThreadPoolExecutor(max_workers=2) as pool:results=list(pool.map(submit,range(2)))
   self.assertEqual(sorted(results),[202,409])
   self.assertEqual(PendingCardRequest.query.filter_by(user_id=self.ids['member'],annee=year).count(),1)
+ def test_concurrent_registration_approvals_finalize_one_card(self):
+  from concurrent.futures import ThreadPoolExecutor
+  from threading import Barrier
+  sub=str(uuid.uuid4());native=self.native(sub)
+  with patch('app.dev_registration.api_user',return_value=native):self.assertEqual(self.hook(sub).status_code,202)
+  rid=db.session.get(DevIdentityBinding,(ISSUER,sub)).pending_id
+  db.session.remove();barrier=Barrier(2)
+  def api(pk,patch=None):
+   if patch:
+    native.update(patch);barrier.wait(timeout=10)
+   return native.copy()
+  def approve(year):
+   c=self.client('admin')
+   return c.post('/api/admin/registrations/'+rid+'/approve',json={'add_card':True,'annee':year,'payment_confirmed':True},headers={'Origin':ORIGIN}).status_code
+  with patch('app.dev_registration.api_user',side_effect=api),ThreadPoolExecutor(max_workers=2) as pool:
+   results=list(pool.map(approve,[current_academic_year(),current_academic_year()+1]))
+  self.assertEqual(results,[200,200])
+  binding=db.session.get(DevIdentityBinding,(ISSUER,sub));self.assertEqual(binding.state,'approved')
+  self.assertEqual(Membership.query.filter_by(user_id=binding.user_id).count(),1)
