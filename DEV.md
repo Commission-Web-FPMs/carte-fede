@@ -10,7 +10,7 @@ Le backend vérifie RS256, issuer DEV exact, audience/client, exp/iat/azp, nonce
 
 Les rôles ADMIN, VERIFIER et MEMBER proviennent exclusivement de PostgreSQL, rechargés à chaque requête. Le backend contrôle les endpoints sensibles : administration ADMIN uniquement, vérification des cartes ADMIN/VERIFIER, données personnelles du compte authentifié. L'administrateur peut modifier les rôles avec les fonctionnalités existantes ; promotion, rétrogradation et mise en attente prennent effet pendant les sessions existantes. Toutes ces écritures restent dans carte_fede_dev.
 
-La politique Authentik DEV accepte les identités actives ; elle ne remplace pas le contrôle d'association métier du backend. Les inscriptions non validées importées dans default restent désactivées. Les anciens comptes de recette synthétiques restent présents dans Authentik, mais n'ont plus de profil métier après la copie PROD et sont refusés.
+La politique Authentik DEV accepte les identités actives ; elle ne remplace pas le contrôle d'association métier du backend. Les inscriptions non validées importées dans default restent désactivées. Trois comptes de recette synthétiques possèdent désormais des profils DEV distincts ADMIN/VERIFIER/MEMBER, associés uniquement à leurs propres UUID. Les autres identités sans association restent refusées.
 
 ## Données et sécurité
 
@@ -41,3 +41,5 @@ Le compte API dédié n'a aucune permission globale. Il reçoit view_user/change
 Recette synthétique : tests PostgreSQL 18 des deux QR, GET/PUT/PATCH administrateur, collisions, historique, approbation/reprise/refus, absence d'écriture API pour identité existante ; validation du flow Authentik natif et des permissions API dans le laboratoire conservé. Une recette HTTPS sur DEV est nécessaire avant déclaration de déploiement terminé. Aucun compte réel importé n'est utilisé pour tester une création ou une approbation.
 
 Les noms et erreurs affichés lors de la vérification des cartes sont échappés avant insertion HTML. Les écrans QR et les réponses de vérification DEV portent TEST DEV ; les tokens expirent après 400 jours et conservent la période de la carte. Les signatures DEV sont refusées avec la clé et le salt de production.
+
+Recette HTTPS du 11 octobre 2026 réussie : GET/PUT/PATCH ADMIN et refus MEMBER/VERIFIER, QR EPC TEST, carte historique synthétique, création native inactive, approbation idempotente, première connexion et carte, identité active existante sans modification globale, rejet conservant l’identité inactive, refus des signatures expirées/altérées/hors environnement. Toutes les lignes et définitions des neuf tables copiées restent inchangées ; les seuls ajouts sont le journal, la configuration de démonstration et les données synthétiques de recette. Les quatre demandes historiques demeurent intactes et désactivées.
