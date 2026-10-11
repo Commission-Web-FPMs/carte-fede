@@ -11,9 +11,11 @@ from app.models import db, User, Role, Membership, PendingRegistration, CardPaym
 p=argparse.ArgumentParser();p.add_argument("--reset-synthetic-dev",action="store_true");a=p.parse_args()
 app=create_app()
 with app.app_context():
-    with db.engine.connect() as c:
+    with db.engine.begin() as c:
         from sqlalchemy import text
         assert c.execute(text("select current_database(), current_user")).one()==("carte_fede_dev","carte_fede_dev")
+        c.execute(text("REVOKE CONNECT, TEMPORARY ON DATABASE carte_fede_dev FROM PUBLIC"))
+        c.execute(text("REVOKE ALL ON SCHEMA public FROM PUBLIC"))
     if a.reset_synthetic_dev:
         db.drop_all()
     db.create_all()
