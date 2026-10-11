@@ -51,6 +51,11 @@ def create_app():
         os.getenv("PASSWORD_RESET_TOKEN_MAX_AGE", "3600")
     )
 
+    if os.getenv("APP_ENV") == "development":
+        from sqlalchemy.engine import make_url
+        uri = make_url(database_url)
+        if uri.database != "carte_fede_dev" or uri.username != "carte_fede_dev" or os.getenv("AUTH_MODE") != "oidc":
+            raise RuntimeError("Public DEV requires its dedicated database, role and OIDC")
     db.init_app(app)
     login_manager = LoginManager()
     login_manager.init_app(app)
@@ -82,6 +87,10 @@ def create_app():
     app.register_blueprint(bp_mem)
     app.register_blueprint(bp_payment)
 
+    if os.getenv("AUTH_MODE", "flask") == "oidc":
+        from .oidc_dev import init_dev_oidc
+        init_dev_oidc(app)
+
     # Auto-create tables only when explicitly enabled (avoid touching existing DBs)
     if os.getenv("AUTO_CREATE_DB", "").lower() in ("1", "true", "yes"):
         with app.app_context():
@@ -90,7 +99,4 @@ def create_app():
             except Exception:
                 log_exception("auto_create_tables_failed")
 
-    if os.getenv("AUTH_MODE", "flask") == "oidc":
-        from .oidc_dev import init_dev_oidc
-        init_dev_oidc(app)
     return app

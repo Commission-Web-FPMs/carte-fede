@@ -37,6 +37,14 @@ class OIDCSecurity(unittest.TestCase):
     def test_production_database_refused_before_sql(self):
         from app import create_app
         with patch.dict(os.environ,dict(self.dev_env(),DATABASE_URL='postgresql+psycopg://carte_fede_main:synthetic@localhost/carte_fede_main')),self.assertRaises(RuntimeError):create_app()
+    def test_auto_create_cannot_connect_to_production(self):
+        from app import create_app
+        with patch.dict(os.environ,dict(self.dev_env(),DATABASE_URL='postgresql+psycopg://carte_fede_main:synthetic@localhost/carte_fede_main',AUTO_CREATE_DB='1')),patch('app.db.create_all') as create:
+            with self.assertRaises(RuntimeError):create_app()
+            create.assert_not_called()
+    def test_public_dev_cannot_fall_back_to_local_auth(self):
+        from app import create_app
+        with patch.dict(os.environ,dict(self.dev_env(),AUTH_MODE='flask')),self.assertRaises(RuntimeError):create_app()
     def test_anonymous_sensitive_routes_refused(self):
         from app import create_app
         with patch.dict(os.environ,self.dev_env()):app=create_app()
