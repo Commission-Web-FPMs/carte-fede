@@ -90,4 +90,7 @@ def create_app():
             except Exception:
                 log_exception("auto_create_tables_failed")
 
+    if os.getenv("AUTH_MODE", "flask") == "oidc":
+        from .oidc_dev import init_dev_oidc
+        init_dev_oidc(app)
     return app

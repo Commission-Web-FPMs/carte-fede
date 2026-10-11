@@ -1,3 +1,4 @@
+import os
 import smtplib
 from email.message import EmailMessage
 
@@ -11,6 +12,8 @@ def _bool(value, default=False):
 
 
 def send_email(to_address: str, subject: str, body_text: str):
+    if os.getenv("APP_ENV") == "development":
+        return  # Deliberately discard; no content, recipient or token logging.
     cfg = current_app.config
     mail_address = (cfg.get("MAIL_ADDRESS") or "").strip()
     mail_password = (cfg.get("MAIL_PASSWORD") or "").strip()

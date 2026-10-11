@@ -8,6 +8,12 @@ path = Path("values.yaml")
 content = path.read_text()
 tag = os.environ["GITHUB_SHA"]
 repository = os.environ["IMAGE_REPOSITORY"]
+branch = os.environ.get("GITHUB_REF_NAME", "main")
+expected = "ghcr.io/commission-web-fpms/carte-fede" + ("-dev" if branch == "develop" else "")
+if branch not in {"main", "develop"} or repository != expected or not re.fullmatch(r"[0-9a-f]{40}", tag):
+    raise RuntimeError("Publication branch/image/SHA isolation failed")
+if branch == "develop" and "carte_fede_dev" not in content:
+    raise RuntimeError("Target chart is not explicitly DEV")
 
 
 def replace_field(pattern, value):

@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 
 interface LoginFormProps {
   next?: string;
@@ -8,6 +8,11 @@ const isSixDigits = (value: string) => /^\d{6}$/.test(value.trim());
 const isEmail = (value: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
 
 const LoginForm: React.FC<LoginFormProps> = ({ next = "/" }) => {
+  const [oidc, setOidc] = useState<boolean | null>(null);
+  useEffect(() => {
+    fetch("/api/auth/mode", { credentials: "include" }).then(r => r.ok ? r.json() : null)
+      .then(d => setOidc(d?.mode === "oidc")).catch(() => setOidc(false));
+  }, []);
   const [ident, setIdent] = useState("");
   const [password, setPassword] = useState("");
   const [remember, setRemember] = useState(true);
@@ -68,6 +73,11 @@ const LoginForm: React.FC<LoginFormProps> = ({ next = "/" }) => {
     }
   };
 
+  if (oidc === null) return <p>Chargement…</p>;
+  if (oidc) return <section className="rounded-xl bg-white p-6 shadow">
+    <p className="mb-4">Environnement de développement — comptes de test uniquement.</p>
+    <a className="rounded bg-blue-700 px-4 py-2 text-white" href={"/api/auth/oidc/login?next=" + encodeURIComponent(next)}>Connexion Authentik DEV</a>
+  </section>;
   return (
     <div className="w-full max-w-md rounded-xl bg-white px-5 py-6 shadow-lg sm:px-8">
       <h1 className="mb-2 bg-white text-xl font-semibold text-bleu sm:text-2xl">Connexion</h1>
