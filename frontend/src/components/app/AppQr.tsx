@@ -11,6 +11,7 @@ function formatAcademicYear(start: number): string {
 }
 
 export default function AppQr() {
+  const [testMode, setTestMode] = useState(false);
   const [loading, setLoading] = useState(true);
   const [memberships, setMemberships] = useState<Membership[]>([]);
   const [selectedYear, setSelectedYear] = useState<number | null>(null);
@@ -19,6 +20,9 @@ export default function AppQr() {
   useEffect(() => {
     const load = async () => {
       try {
+        const mode = await fetch('/api/auth/mode', {credentials:'include'});
+        if (!mode.ok) throw new Error('Mode unavailable');
+        setTestMode((await mode.json()).development === true);
         const me = await fetchCurrentUser();
         if (!me.ok) {
           window.location.href = "/login?next=" + encodeURIComponent(window.location.pathname);
@@ -71,9 +75,9 @@ export default function AppQr() {
     <section className="mx-auto flex w-full max-w-5xl flex-col gap-6 px-4 py-5 sm:px-8 sm:py-8">
       <header className="grid gap-4 rounded-3xl border border-slate-200 bg-white/90 p-5 shadow-sm md:grid-cols-[1fr_auto] md:items-center sm:p-8">
         <div>
-          <h1 className="text-4xl font-black tracking-tight text-slate-900">Mon QR - Carte Fede</h1>
+          <h1 className="text-4xl font-black tracking-tight text-slate-900">{testMode ? 'TEST DEV — Mon QR' : 'Mon QR - Carte Fede'}</h1>
           <p className="mt-2 max-w-2xl text-base leading-relaxed text-slate-500">
-            Présentez ce QR code pour prouver votre adhésion lors des contrôles. Sélectionnez une période pour générer automatiquement le QR correspondant.
+            {testMode ? 'QR de test exclusivement DEV : aucun justificatif de production. Sélectionnez une période pour vérifier une carte dans cet environnement.' : 'Présentez ce QR code pour prouver votre adhésion lors des contrôles. Sélectionnez une période pour générer automatiquement le QR correspondant.'}
           </p>
         </div>
         <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm font-semibold text-emerald-700">

@@ -182,14 +182,19 @@ import Layout from "../../layouts/Layout.astro";
     else renderOK(j);
   }
 
+  function escapeHTML(value) {
+    const entities = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+    return String(value ?? '').replace(/[&<>"']/g, character => entities[character]);
+  }
+
   function renderOK(j) {
     result.innerHTML = `
       <div class="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-4 text-emerald-800">
-        <p class="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-700">Carte valide</p>
-        <h3 class="mt-2 text-lg font-semibold">✅ ${j.user.prenom} ${j.user.nom}</h3>
+        <p class="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-700">${j.test_mode === true ? 'TEST DEV — ' : ''}Carte valide</p>
+        <h3 class="mt-2 text-lg font-semibold">✅ ${escapeHTML(j.user.prenom)} ${escapeHTML(j.user.nom)}</h3>
         <p class="mt-2 leading-6">
-          Période: <strong>${j.periode}</strong><br/>
-          Numéro: <strong>${j.code}</strong>
+          Période: <strong>${escapeHTML(j.periode)}</strong><br/>
+          Numéro: <strong>${escapeHTML(j.code)}</strong>
         </p>
       </div>`;
   }
@@ -199,7 +204,7 @@ import Layout from "../../layouts/Layout.astro";
       <div class="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-4 text-rose-800">
         <p class="text-xs font-semibold uppercase tracking-[0.18em] text-rose-700">Invalide</p>
         <h3 class="mt-2 text-lg font-semibold">❌ Verification refusee</h3>
-        <p class="mt-2 leading-6">${msg}</p>
+        <p class="mt-2 leading-6">${escapeHTML(msg)}</p>
       </div>`;
   }
 
