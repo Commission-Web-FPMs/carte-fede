@@ -76,6 +76,8 @@ def create_app():
 
     @login_manager.user_loader
     def load_user(user_id):
+        if os.getenv("APP_ENV") == "development":
+            return db.session.get(User, user_id, populate_existing=True)
         return User.query.get(user_id)
 
     @app.get("/api/health")

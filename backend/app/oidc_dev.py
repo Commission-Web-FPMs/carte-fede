@@ -6,7 +6,6 @@ import json
 import os
 import secrets
 import time
-import uuid
 from datetime import timedelta
 from urllib.parse import urlencode, urlsplit
 
@@ -19,37 +18,20 @@ from flask_session import Session
 from sqlalchemy.engine import make_url
 
 from .models import db, Role, User
-from sqlalchemy.exc import IntegrityError
 
 
 def bound_dev_uuid(subject, mapping):
-    """Stable DEV-only pseudonym; never associate by editable attributes or email."""
-    if subject in mapping:
-        return mapping[subject]
-    identity = uuid.UUID(subject)
-    if str(identity) != subject:
-        raise ValueError("Noncanonical subject")
-    return str(uuid.uuid5(uuid.NAMESPACE_URL, "carte-fede-dev/authentik/" + subject))
+    """Only explicit, verified bindings; issuer is checked before this lookup."""
+    identity = mapping.get(subject)
+    if not identity:
+        raise ValueError("No verified business identity binding")
+    return identity
 
 
 def get_dev_user(subject, mapping):
     identity = bound_dev_uuid(subject, mapping)
-    user = db.session.get(User, identity)
-    if user is None and subject not in mapping:
-        user = User(id=identity, nom="DEV", prenom="Membre", member_id=None,
-            email=identity + "@dev.invalid", password_hash="!disabled-local-auth", role=Role.MEMBER)
-        db.session.add(user)
-        try:
-            db.session.commit()
-        except IntegrityError:
-            db.session.rollback()
-            user = db.session.get(User, identity)
-            if user is None:
-                raise
-    # Existing-account DEV profiles never acquire elevated or imported roles.
-    if subject not in mapping and user is not None and user.role != Role.MEMBER:
-        raise ValueError("Existing-account DEV role must be MEMBER")
-    return user
+    # No provisioning and no OIDC roles/groups: PostgreSQL owns business roles.
+    return db.session.get(User, identity, populate_existing=True)
 
 
 def verify_claims(encoded, key, issuer, audience, nonce, mapping):
@@ -126,11 +108,13 @@ def init_dev_oidc(app):
                 timeout=8, allow_redirects=False)
             r.raise_for_status()
             info = r.json()
-            if info.get("sub") != session.get("oidc_sub") or info.get("carte_fede_dev_allowed") is not True or bound_dev_uuid(info.get("sub"), mapping) != info.get("carte_fede_uuid") or str(current_user.id) != info.get("carte_fede_uuid") or current_user.role == Role.ATTENTE or (info.get("sub") not in mapping and current_user.role != Role.MEMBER):
+            if info.get("sub") != session.get("oidc_sub") or info.get("carte_fede_dev_allowed") is not True or bound_dev_uuid(info.get("sub"), mapping) != info.get("carte_fede_uuid") or str(current_user.id) != info.get("carte_fede_uuid") or current_user.role == Role.ATTENTE:
                 raise ValueError("Identity no longer authorized")
         except (ValueError, KeyError, requests.RequestException):
             revoke_and_clear()
             return jsonify({"error": "oidc_session_unavailable_or_revoked"}), 401
+        if request.path in {"/api/verify", "/verify"} and current_user.role not in {Role.ADMIN, Role.VERIFIER}:
+            return jsonify({"error": "forbidden"}), 403
         if request.path == "/api/auth/logout":
             revoke_and_clear()
             return jsonify({"ok": True})

@@ -32,16 +32,19 @@ class OIDCSecurity(unittest.TestCase):
         with self.assertRaises(jwt.PyJWTError):verify_claims(encoded,self.key.public_key(),self.issuer,'carte-fede-dev','synthetic-nonce',self.bindings)
     def test_multi_audience_needs_authorized_party(self):
         with self.assertRaises(ValueError):self.validate(dict(self.claims,aud=['carte-fede-dev','other']))
-    def test_existing_account_has_distinct_deterministic_dev_uuid(self):
-        subject='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
-        identity=bound_dev_uuid(subject,self.bindings)
-        self.assertNotEqual(identity,subject)
-        self.assertEqual(identity,bound_dev_uuid(subject,self.bindings))
-        self.assertEqual(self.validate(dict(self.claims,sub=subject,carte_fede_uuid=identity))['sub'],subject)
-        with self.assertRaises(ValueError):self.validate(dict(self.claims,sub=subject,carte_fede_uuid='synthetic-business-uuid'))
-    def test_unknown_noncanonical_subject_refused(self):
-        for value in ['unknown','AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA',None]:
-            with self.assertRaises((ValueError,TypeError,AttributeError)):bound_dev_uuid(value,self.bindings)
+    def test_unmapped_identity_never_receives_a_profile(self):
+        from app.oidc_dev import get_dev_user
+        with patch('app.oidc_dev.db.session') as database:
+            with self.assertRaises(ValueError):get_dev_user('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',self.bindings)
+            database.get.assert_not_called();database.add.assert_not_called();database.commit.assert_not_called()
+    def test_database_role_is_not_overwritten(self):
+        from app.oidc_dev import get_dev_user
+        from app.models import Role
+        for role in [Role.ADMIN,Role.VERIFIER,Role.MEMBER]:
+            with patch('app.oidc_dev.db.session') as database:
+                database.get.return_value.role=role
+                user=get_dev_user('synthetic-sub',self.bindings)
+                self.assertEqual(user.role,role);database.add.assert_not_called();database.commit.assert_not_called()
     def dev_env(self):
         return dict(APP_ENV='development',AUTH_MODE='oidc',DATABASE_URL='postgresql+psycopg://carte_fede_dev:synthetic@localhost/carte_fede_dev',SECRET_KEY='synthetic-test-key',FRONTEND_BASE_URL='https://carte-dev.fede.fpms.ac.be',OIDC_ISSUER_URL=self.issuer,OIDC_CLIENT_ID='carte-fede-dev',OIDC_CLIENT_SECRET='synthetic-only',OIDC_IDENTITY_BINDINGS='{"synthetic-sub":"synthetic-business-uuid"}',AUTO_CREATE_DB='0')
     def test_production_database_refused_before_sql(self):
@@ -63,19 +66,26 @@ class OIDCSecurity(unittest.TestCase):
             self.assertEqual(client.get(path).status_code,401)
         for path in ['/api/auth/login','/api/auth/register','/api/card-payment/qr']:
             self.assertEqual(client.post(path).status_code,403)
-    def test_existing_account_cannot_gain_elevated_role_during_session(self):
+    def test_database_roles_and_session_role_changes(self):
         from app import create_app
         from app.models import Role
-        subject='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
-        identity=bound_dev_uuid(subject,self.bindings)
         with patch.dict(os.environ,self.dev_env()):app=create_app()
+        @app.get('/api/test-role')
+        def role_probe():
+            from app.oidc_dev import current_user
+            return {'role':current_user.role.value}
         c=app.test_client()
         with c.session_transaction() as session:
-            session.update(oidc_sub=subject,oidc_access_token='synthetic-token',oidc_expires_at=time.time()+200)
+            session.update(oidc_sub='synthetic-sub',oidc_access_token='synthetic-token',oidc_expires_at=time.time()+200)
         with patch('app.oidc_dev.current_user') as user,patch('app.oidc_dev.requests.get') as get,patch('app.oidc_dev.requests.post'):
-            user.is_authenticated=True;user.id=identity;user.role=Role.ADMIN
-            get.return_value.json.return_value={'sub':subject,'carte_fede_uuid':identity,'carte_fede_dev_allowed':True}
-            self.assertEqual(c.get('/api/admin/users').status_code,401)
+            user.is_authenticated=True;user.id='synthetic-business-uuid'
+            get.return_value.json.return_value={'sub':'synthetic-sub','carte_fede_uuid':'synthetic-business-uuid','carte_fede_dev_allowed':True,'roles':['admin'],'groups':['membres']}
+            for role in [Role.MEMBER,Role.VERIFIER,Role.ADMIN,Role.MEMBER]:
+                user.role=role
+                self.assertEqual(c.get('/api/test-role').json['role'],role.value)
+                if role==Role.MEMBER:self.assertEqual(c.get('/api/verify').status_code,403)
+            user.role=Role.ATTENTE
+            self.assertEqual(c.get('/api/test-role').status_code,401)
     def test_pkce_state_nonce_and_no_open_redirect(self):
         from app import create_app
         with patch.dict(os.environ,self.dev_env()):app=create_app()
