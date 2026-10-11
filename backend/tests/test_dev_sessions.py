@@ -64,3 +64,19 @@ class DEVSessionTiming(unittest.TestCase):
   r=self.client.get('/api/auth/oidc/login?expired=1')
   q=parse_qs(urlsplit(r.location).query)
   self.assertEqual(q['prompt'],['login']);self.assertEqual(q['max_age'],['0']);self.assertIn('offline_access',q['scope'][0])
+
+ def test_same_cookie_concurrent_refresh_is_serialized(self):
+  from concurrent.futures import ThreadPoolExecutor
+  self.now.return_value=self.start+300
+  cookie=self.client.get_cookie('__Host-carte-fede-dev')
+  import threading
+  ready=threading.Barrier(2)
+  response=self.post.return_value
+  def delayed_post(*args,**kwargs):time.sleep(0.1);return response
+  self.post.side_effect=delayed_post
+  def call():
+   client=self.app.test_client();client.set_cookie(cookie.key,cookie.value);ready.wait(timeout=5)
+   return client.get('/api/auth/session').status_code
+  with ThreadPoolExecutor(max_workers=2) as pool:self.assertEqual(list(pool.map(lambda _:call(),range(2))),[200,200])
+  refreshes=[c for c in self.post.call_args_list if c.kwargs.get('data',{}).get('grant_type')=='refresh_token']
+  self.assertEqual(len(refreshes),1)

@@ -7,7 +7,7 @@ type Membership = {
   annee: number;
   annee_code?: string;
 };
-type CardRequest = { annee: number; status: "payment_required" | "pending" | "rejected"; free_card?: boolean };
+type CardRequest = { annee: number; status: string; free_card?: boolean };
 type Payment = { annee: number; beneficiary: string; iban: string; bic: string; amount: string; communication_prefix: string };
 
 function formatAcademicYear(start: number): string {

@@ -4,7 +4,7 @@ import hashlib
 import os
 import re
 from itsdangerous import BadSignature
-from flask import request, g
+from flask import g
 
 def session_expired(values, now, idle, absolute):
     created=values.get("oidc_created_at",0)
@@ -12,6 +12,8 @@ def session_expired(values, now, idle, absolute):
     return not created or not active or now < created or now < active or now >= created+absolute or now >= active+idle
 
 def configure_sessions(app, directory):
+    lock_directory=directory+"-locks"
+    os.makedirs(lock_directory,mode=0o700,exist_ok=True)
     original=app.session_interface
     class SerializedSessionInterface(type(original)):
         def open_session(self, app, req):
@@ -21,7 +23,7 @@ def configure_sessions(app, directory):
                 try:sid=self._unsign(app,cookie) if self.use_signer else cookie
                 except BadSignature:pass
             if sid and re.fullmatch(r"[A-Za-z0-9_-]{32,128}",sid) and g.get("dev_session_lock") is None:
-                path=os.path.join(directory, "lock-"+hashlib.sha256(sid.encode()).hexdigest())
+                path=os.path.join(lock_directory, "lock-"+hashlib.sha256(sid.encode()).hexdigest())
                 handle=os.open(path,os.O_CREAT|os.O_RDWR,0o600)
                 fcntl.flock(handle,fcntl.LOCK_EX)
                 g.dev_session_lock=handle
