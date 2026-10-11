@@ -11,7 +11,11 @@ const LoginForm: React.FC<LoginFormProps> = ({ next = "/" }) => {
   const [oidc, setOidc] = useState<boolean | null>(null);
   useEffect(() => {
     fetch("/api/auth/mode", { credentials: "include" }).then(r => r.ok ? r.json() : null)
-      .then(d => setOidc(d?.mode === "oidc")).catch(() => setOidc(false));
+      .then(d => {
+        if (!d) throw new Error("Mode indisponible");
+        setOidc(d.mode === "oidc");
+        if (d.mode === "oidc") window.location.replace("/api/auth/oidc/login");
+      }).catch(() => setError("Connexion indisponible. Réessayez plus tard."));
   }, []);
   const [ident, setIdent] = useState("");
   const [password, setPassword] = useState("");
@@ -73,10 +77,10 @@ const LoginForm: React.FC<LoginFormProps> = ({ next = "/" }) => {
     }
   };
 
-  if (oidc === null) return <p>Chargement…</p>;
+  if (oidc === null) return <p role="status">{error || "Chargement…"}</p>;
   if (oidc) return <section className="rounded-xl bg-white p-6 shadow">
-    <p className="mb-4">Environnement de développement — comptes de test uniquement.</p>
-    <a className="rounded bg-blue-700 px-4 py-2 text-white" href={"/api/auth/oidc/login?next=" + encodeURIComponent(next)}>Connexion Authentik DEV</a>
+    <p className="mb-4">Redirection vers Authentik…</p>
+    <a className="rounded bg-blue-700 px-4 py-2 text-white" href="/api/auth/oidc/login">Connexion Authentik DEV</a>
   </section>;
   return (
     <div className="w-full max-w-md rounded-xl bg-white px-5 py-6 shadow-lg sm:px-8">

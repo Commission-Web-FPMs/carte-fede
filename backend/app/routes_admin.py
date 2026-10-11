@@ -155,7 +155,7 @@ def decide_registration(request_id, decision):
 def decide_card_request(request_id, decision):
     if decision not in ("approve", "reject", "payment-received"):
         return jsonify({"error": "Décision invalide."}), 404
-    row = PendingCardRequest.query.filter_by(id=request_id).first()
+    row = PendingCardRequest.query.filter_by(id=request_id).with_for_update().first()
     if not row:
         return jsonify({"error": "Demande introuvable."}), 404
     if decision == "payment-received":
@@ -177,6 +177,8 @@ def decide_card_request(request_id, decision):
     data = request.get_json(silent=True) or {}
     if not isinstance(data, dict):
         return jsonify({"error": "Données invalides."}), 400
+    if development_payment() and row.free_card and data.get("bac1_verified") is not True:
+        return jsonify({"error": "Vérifiez explicitement l’exemption BAC1 avant attribution."}), 409
     prefix = str(data.get("prefix") or "A").upper()
     if prefix not in ALLOWED_PREFIXES:
         return jsonify({"error": "Préfixe invalide."}), 400

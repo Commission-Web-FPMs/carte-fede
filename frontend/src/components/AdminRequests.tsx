@@ -219,6 +219,7 @@ export default function AdminRequests({
                       event.preventDefault();
                       void decide("card-requests", item.id, "approve", {
                         prefix: new FormData(event.currentTarget).get("prefix"),
+                        bac1_verified: new FormData(event.currentTarget).get("bac1_verified") === "on",
                       });
                     }}
                   >
@@ -230,6 +231,7 @@ export default function AdminRequests({
                         ))}
                       </select>
                     </label>
+                    {item.free_card && <label><input type="checkbox" name="bac1_verified" required /> Exemption BAC1 vérifiée</label>}
                     <button
                       className="admin-button admin-primary"
                       disabled={!!busy || item.status === "payment_required"}

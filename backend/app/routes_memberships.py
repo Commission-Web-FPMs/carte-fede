@@ -34,25 +34,33 @@ def card_requests():
     if not isinstance(data, dict) or type(data.get("annee")) is not int:
         return jsonify({"error": "Année invalide."}), 400
     year = data["annee"]
+    free_requested = data.get("free_card_requested", False)
+    if type(free_requested) is not bool:
+        return jsonify({"error": "Option de gratuité invalide."}), 400
+    status = "pending" if free_requested else "payment_required"
     if year not in (current_academic_year(), current_academic_year() + 1):
         return jsonify({"error": "Choisissez l'année académique actuelle ou la suivante."}), 400
+    # Lock the stable parent even when the request does not exist yet.
+    User.query.filter_by(id=current_user.id).with_for_update().one()
     if Membership.query.filter_by(user_id=current_user.id, annee=year).first():
         return jsonify({"error": "Vous possédez déjà une carte pour cette année."}), 409
     row = PendingCardRequest.query.filter_by(user_id=current_user.id, annee=year).first()
     if row and row.status in ("pending", "payment_required"):
         return jsonify({"error": "Une demande est déjà en attente pour cette année."}), 409
+    if row and row.status != "rejected":
+        return jsonify({"error": "Demande déjà traitée ; contactez un administrateur."}), 409
     if row:
-        row.status = "payment_required"
-        row.free_card = False
+        row.status = status
+        row.free_card = free_requested
         row.created_at = datetime.utcnow()
     else:
-        db.session.add(PendingCardRequest(user_id=current_user.id, annee=year, status="payment_required"))
+        db.session.add(PendingCardRequest(user_id=current_user.id, annee=year, status=status, free_card=free_requested))
     try:
         db.session.commit()
     except IntegrityError:
         db.session.rollback()
         return jsonify({"error": "Une demande est déjà en attente pour cette année."}), 409
-    return jsonify({"ok": True, "annee": year, "status": "payment_required"}), 202
+    return jsonify({"ok": True, "annee": year, "status": status}), 202
 
 
 # ---------- Helpers (validation/normalisation) ----------

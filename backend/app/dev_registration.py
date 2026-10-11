@@ -1,14 +1,15 @@
 """DEV-only approval journal. Identity verified by OIDC or signed native enrollment."""
-import hashlib, hmac, json, os, re, time, uuid
+import hashlib, hmac, json, os, re, time, uuid, secrets
 from collections import deque
 from threading import Lock
 _enrollment_checks=deque()
 _enrollment_lock=Lock()
 from datetime import datetime, timedelta
 import requests
-from flask import Blueprint, current_app, jsonify, request, session
+from flask import Blueprint, current_app, jsonify, request, session, redirect
+from itsdangerous import URLSafeTimedSerializer, BadSignature
 from sqlalchemy.exc import IntegrityError
-from .models import db, DevIdentityBinding, PendingRegistration, User, Role, Membership, PendingCardRequest
+from .models import db, DevIdentityBinding, DevEnrollmentConfirmation, PendingRegistration, User, Role, Membership, PendingCardRequest
 
 ISSUER = "https://auth.fede.fpms.ac.be/application/o/carte-fede-dev/"
 ORIGIN = "https://carte-dev.fede.fpms.ac.be"
@@ -101,6 +102,8 @@ def decide(row, decision, data):
         b.state='rejected';db.session.delete(row);db.session.commit();return {'ok':True,'state':'rejected'}
     if not isinstance(data,dict):raise RegistrationError('Données invalides.',400)
     add_card=data.get('add_card') is True;year=data.get('annee');prefix=str(data.get('prefix') or 'A').upper()
+    if add_card and not (data.get('payment_confirmed') is True or (row.free_card_requested and data.get('bac1_verified') is True)):
+        raise RegistrationError('Confirmez le paiement ou vérifiez explicitement l’exemption BAC1 avant attribution.')
     if add_card and (type(year) is not int or year not in [current_academic_year(),current_academic_year()+1] or prefix not in ALLOWED_PREFIXES):raise RegistrationError('Année/préfixe invalide.',400)
     # A persistent ATTENTE user is the local barrier between the two systems.
     if b.state=='pending':
@@ -121,6 +124,8 @@ def decide(row, decision, data):
 
 @bp.before_request
 def registration_guard():
+    if request.path in ['/api/dev/enrollment-confirm', '/api/dev/enrollment-notice']:
+        return None
     if request.method not in ['GET','HEAD'] and request.path!='/api/dev/enrollment-hook' and request.headers.get('Origin')!=ORIGIN:return jsonify(error='invalid_origin'),403
     if request.path=='/api/dev/enrollment-hook':return None
     try:
@@ -156,14 +161,45 @@ def enrollment_hook():
                 if len(_enrollment_checks)>=20:raise RegistrationError('Trop de demandes ; réessayez plus tard.',429)
                 _enrollment_checks.append(now)
             check_available(values);return jsonify(ok=True)
-        if data.get('operation')!='created':raise RegistrationError('Opération invalide.',400)
-        subject=str(uuid.UUID(data['subject']));u=api_user(data['auth_user_pk']);probe=DevIdentityBinding(subject=subject,user_id=None)
-        verify_owned(probe,u)
-        if u.get('is_active'):raise RegistrationError('Nouvelle identité doit être inactive.')
+        if data.get('operation') not in ['created','existing']:raise RegistrationError('Opération invalide.',400)
+        subject=str(uuid.UUID(data['subject']))
+        managed=data['operation']=='created'
+        if managed:
+            u=api_user(data['auth_user_pk']);probe=DevIdentityBinding(subject=subject,user_id=None)
+            verify_owned(probe,u)
+            if u.get('is_active'):raise RegistrationError('Nouvelle identité doit être inactive.')
+        elif data.get('active_attestation') is not True:
+            raise RegistrationError('Identité active non attestée.',401)
         # Only native flow fields, never passwords, reach this API.
-        b=create_pending(subject,values,managed=True,auth_pk=data['auth_user_pk'],request_id=subject)
-        return jsonify(ok=True,state=b.state),202
+        b=create_pending(subject,values,managed=managed,auth_pk=data['auth_user_pk'] if managed else None,request_id=subject)
+        nonce=secrets.token_urlsafe(32)
+        db.session.add(DevEnrollmentConfirmation(nonce_digest=hashlib.sha256(nonce.encode()).hexdigest(),request_id=b.request_id,expires_at=datetime.utcnow()+timedelta(minutes=5)))
+        db.session.commit()
+        token=URLSafeTimedSerializer(current_app.config['SECRET_KEY'],salt='dev-enrollment-confirmation-v1').dumps({'nonce':nonce})
+        return jsonify(ok=True,state=b.state,confirmation_url=ORIGIN+'/api/dev/enrollment-confirm?state='+token),202
     except RegistrationError as e:return fail(e)
     except (ValueError,KeyError,TypeError):return fail(RegistrationError('Attestation invalide.',400))
     except IntegrityError:return fail(RegistrationError('Conflit de demande.'))
     except requests.RequestException:return fail(RegistrationError('Identité indisponible ; aucune activation.',503))
+
+@bp.get('/api/dev/enrollment-confirm')
+def enrollment_confirm():
+    try:
+        payload=URLSafeTimedSerializer(current_app.config['SECRET_KEY'],salt='dev-enrollment-confirmation-v1').loads(request.args.get('state',''),max_age=300)
+        digest=hashlib.sha256(payload['nonce'].encode()).hexdigest()
+        row=DevEnrollmentConfirmation.query.filter_by(nonce_digest=digest).with_for_update().first()
+        if not row or row.consumed_at or row.expires_at<=datetime.utcnow():raise ValueError('Invalid confirmation')
+        row.consumed_at=datetime.utcnow();db.session.commit()
+        # Confirmation grants no login, identity binding or business authorization.
+        session['enrollment_notice_until']=time.time()+300
+    except (BadSignature,ValueError,KeyError,TypeError):
+        db.session.rollback()
+        return jsonify(error='invalid_or_consumed_confirmation'),400
+    response=redirect(ORIGIN+'/');response.headers['Cache-Control']='no-store';response.headers['Referrer-Policy']='no-referrer'
+    return response
+
+@bp.get('/api/dev/enrollment-notice')
+def enrollment_notice():
+    response=jsonify(pending_confirmation=time.time()<session.get('enrollment_notice_until',0))
+    response.headers['Cache-Control']='no-store'
+    return response

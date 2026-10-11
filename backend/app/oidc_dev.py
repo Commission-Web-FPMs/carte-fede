@@ -106,7 +106,7 @@ def init_dev_oidc(app):
             if request.method not in {"GET", "HEAD", "OPTIONS"} and request.headers.get("Origin") != origin:
                 return jsonify({"error": "invalid_origin"}), 403
             return None
-        if request.path in {"/api/auth/oidc/login", "/api/auth/oidc/callback", "/api/dev/registration", "/api/dev/enrollment-hook"}:
+        if request.path in {"/api/auth/oidc/login", "/api/auth/oidc/callback", "/api/dev/registration", "/api/dev/enrollment-hook", "/api/dev/enrollment-confirm", "/api/dev/enrollment-notice"}:
             return None
         if request.path in {"/api/auth/login", "/api/auth/register"} or "password" in request.path.lower():
             return jsonify({"error": "local_auth_disabled_in_oidc_development"}), 403
@@ -135,6 +135,19 @@ def init_dev_oidc(app):
 
     @app.get("/api/auth/oidc/login")
     def oidc_login():
+        if current_user.is_authenticated and request.args.get("registration") != "1":
+            try:
+                if time.time() >= session.get("oidc_expires_at", 0):
+                    raise ValueError("Expired session")
+                info = requests.get(root + "/application/o/userinfo/", headers={"Authorization": "Bearer " + session["oidc_access_token"]}, timeout=8, allow_redirects=False)
+                info.raise_for_status()
+                claims = info.json()
+                bound = bound_dev_uuid(claims.get("sub"), mapping)
+                if claims.get("sub") != session.get("oidc_sub") or claims.get("carte_fede_dev_allowed") is not True or bound != str(current_user.id) or current_user.role == Role.ATTENTE or (bound != claims.get("carte_fede_uuid") and not (not claims.get("carte_fede_uuid") and mapping.allows_empty_claim(claims.get("sub")))):
+                    raise ValueError("Unauthorized identity")
+                return redirect(origin + "/")
+            except (ValueError, KeyError, requests.RequestException):
+                revoke_and_clear()
         session.clear()
         app.session_interface.regenerate(session)
         session["oidc_state"] = secrets.token_urlsafe(32)
@@ -182,7 +195,7 @@ def init_dev_oidc(app):
             app.session_interface.regenerate(session)
             session.update(oidc_sub=claims["sub"], oidc_access_token=token["access_token"],
                 oidc_expires_at=min(claims["exp"], time.time() + 300))
-            return redirect(target)
+            return redirect(origin + "/")
         except (ValueError, KeyError, jwt.PyJWTError, requests.RequestException):
             revoke_and_clear()
             return jsonify({"error": "oidc_authentication_rejected"}), 401

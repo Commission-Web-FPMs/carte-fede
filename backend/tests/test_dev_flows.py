@@ -27,7 +27,7 @@ class DevFlows(unittest.TestCase):
  @classmethod
  def tearDownClass(cls):cls.environment.stop()
  def setUp(self):
-  self.context=self.app.app_context();self.context.push();db.drop_all();db.create_all();self.ids={}
+  self.context=self.app.app_context();self.context.push();db.session.remove();db.engine.dispose();db.drop_all();db.create_all();self.ids={}
   for r in ['admin','verifier','member']:
    uid=str(uuid.uuid5(uuid.NAMESPACE_URL,'synthetic/'+r));self.ids[r]=uid
    db.session.add(User(id=uid,nom='Synthetic',prenom=r,email=r+'@example.invalid',password_hash='!oidc-only',role=Role[r.upper()]))
@@ -47,7 +47,7 @@ class DevFlows(unittest.TestCase):
   raw=json.dumps(dict(operation=operation,subject=sub,auth_user_pk=pk,business=business or self.business())).encode();stamp=str(int(time.time()));sign=hmac.new(b'synthetic-hook',stamp.encode()+b'.'+raw,hashlib.sha256).hexdigest()
   return self.app.test_client().post('/api/dev/enrollment-hook',data=raw,headers={'Content-Type':'application/json','X-Enrollment-Time':stamp,'X-Enrollment-Signature':sign if signature else 'forged'})
  def native(self,sub,active=False):return dict(uuid=sub,path='users/carte-fede-dev-enrollment',type='internal',is_active=active,is_superuser=False,roles=[],groups=['default-group'],attributes={'carte_fede_dev_owned':True})
- def approve(self,request_id):return self.client('admin').post('/api/admin/registrations/'+request_id+'/approve',json={'add_card':True,'annee':current_academic_year()},headers={'Origin':ORIGIN})
+ def approve(self,request_id):return self.client('admin').post('/api/admin/registrations/'+request_id+'/approve',json={'add_card':True,'annee':current_academic_year(),'payment_confirmed':True},headers={'Origin':ORIGIN})
  def test_settings_permissions_demo_only_and_origin(self):
   payload=dict(beneficiary='TEST DEMO',iban=DEMO_IBAN,bic='',amount='12.50',communication_prefix='TEST Carte')
   admin=self.client('admin');self.assertEqual(admin.get('/api/admin/card-payment').status_code,200);self.assertEqual(admin.get('/api/admin/card-payment').json['iban'],DEMO_IBAN)
@@ -101,3 +101,58 @@ class DevFlows(unittest.TestCase):
    self.assertEqual(self.hook(sub).status_code,202);self.assertEqual(self.hook(str(uuid.uuid4())).status_code,409)
   row=PendingRegistration(id=str(uuid.uuid4()),nom='Historical',prenom='Pending',member_id='800003',password_hash='copied-unusable-test',expires_at=datetime.utcnow()+timedelta(days=1));db.session.add(row);db.session.flush();db.session.add(DevIdentityBinding(issuer=ISSUER,subject=str(uuid.uuid4()),pending_id=row.id,request_id=row.id,state='historical',managed=False));db.session.commit()
   with patch('app.dev_registration.api_user') as api:self.assertEqual(self.approve(row.id).status_code,409);api.assert_not_called()
+ def test_confirmation_single_use_without_business_access(self):
+  from urllib.parse import urlsplit
+  sub=str(uuid.uuid4())
+  with patch('app.dev_registration.api_user',return_value=self.native(sub)):r=self.hook(sub)
+  self.assertEqual(r.status_code,202);url=urlsplit(r.json['confirmation_url']);c=self.app.test_client()
+  self.assertEqual(c.get(url.path+'?'+url.query).status_code,302)
+  self.assertTrue(c.get('/api/dev/enrollment-notice').json['pending_confirmation'])
+  self.assertEqual(c.get('/api/me').status_code,401)
+  self.assertEqual(c.get(url.path+'?'+url.query).status_code,400)
+  self.assertEqual(c.get('/api/dev/enrollment-confirm?state=forged').status_code,400)
+ def test_card_request_payment_refusal_resubmit_and_permissions(self):
+  from app.models import PendingCardRequest
+  year=current_academic_year();c=self.client('member');h={'Origin':ORIGIN}
+  self.assertEqual(c.post('/api/memberships/requests',json={'annee':year},headers={'Origin':'https://evil.invalid'}).status_code,403)
+  self.assertEqual(c.post('/api/memberships/requests',json={'annee':year+2},headers=h).status_code,400)
+  self.assertEqual(c.post('/api/memberships/requests',json={'annee':year},headers=h).status_code,202)
+  self.assertEqual(c.post('/api/memberships/requests',json={'annee':year},headers=h).status_code,409)
+  row=PendingCardRequest.query.filter_by(user_id=self.ids['member'],annee=year).one();path='/api/admin/card-requests/'+row.id
+  for role in ['member','verifier']:self.assertEqual(self.client(role).post(path+'/approve',json={},headers=h).status_code,403)
+  admin=self.client('admin');self.assertEqual(admin.post(path+'/approve',json={},headers=h).status_code,409)
+  self.assertEqual(admin.post(path+'/reject',json={},headers=h).status_code,200)
+  self.assertEqual(c.post('/api/memberships/requests',json={'annee':year},headers=h).status_code,202)
+  self.assertEqual(admin.post(path+'/payment-received',json={},headers=h).status_code,200)
+  self.assertEqual(admin.post(path+'/approve',json={},headers=h).status_code,200)
+  self.assertEqual(admin.post(path+'/approve',json={},headers=h).status_code,404)
+  self.assertEqual(Membership.query.filter_by(user_id=self.ids['member'],annee=year).count(),1)
+  self.assertEqual(c.get('/api/qr/'+str(year)+'.png').status_code,200)
+ def test_free_card_requires_explicit_admin_bac1_verification(self):
+  from app.models import PendingCardRequest
+  year=current_academic_year();c=self.client('member');h={'Origin':ORIGIN}
+  self.assertEqual(c.post('/api/memberships/requests',json={'annee':year,'free_card_requested':'true'},headers=h).status_code,400)
+  self.assertEqual(c.post('/api/memberships/requests',json={'annee':year,'free_card_requested':True},headers=h).status_code,202)
+  row=PendingCardRequest.query.filter_by(user_id=self.ids['member'],annee=year).one();path='/api/admin/card-requests/'+row.id
+  admin=self.client('admin')
+  self.assertEqual(admin.post(path+'/approve',json={},headers=h).status_code,409)
+  self.assertEqual(admin.post(path+'/payment-received',json={},headers=h).status_code,409)
+  self.assertEqual(admin.post(path+'/approve',json={'bac1_verified':True},headers=h).status_code,200)
+ def test_existing_valid_session_home_and_revoked_session_reauthentication(self):
+  c=self.client('member');r=c.get('/api/auth/oidc/login?next=//evil.invalid')
+  self.assertEqual(r.status_code,302);self.assertEqual(r.location,ORIGIN+'/')
+  with c.session_transaction() as s:s['oidc_expires_at']=time.time()-1
+  with patch('app.oidc_dev.requests.post'):
+   r=c.get('/api/auth/oidc/login')
+  self.assertTrue(r.location.startswith('https://auth.fede.fpms.ac.be/application/o/authorize/'))
+ def test_concurrent_card_requests_create_exactly_one(self):
+  from concurrent.futures import ThreadPoolExecutor
+  from app.models import PendingCardRequest
+  year=current_academic_year()
+  db.session.remove()
+  def submit(_):
+   c=self.client('member')
+   return c.post('/api/memberships/requests',json={'annee':year},headers={'Origin':ORIGIN}).status_code
+  with ThreadPoolExecutor(max_workers=2) as pool:results=list(pool.map(submit,range(2)))
+  self.assertEqual(sorted(results),[202,409])
+  self.assertEqual(PendingCardRequest.query.filter_by(user_id=self.ids['member'],annee=year).count(),1)

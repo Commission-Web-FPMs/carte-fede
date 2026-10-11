@@ -11,6 +11,8 @@ type Me = {
 
 
 export default function Nav() {
+  const [oidc, setOidc] = useState(false);
+  useEffect(() => { fetch("/api/auth/mode", { credentials: "include" }).then(r => r.ok ? r.json() : null).then(d => setOidc(d?.mode === "oidc")).catch(() => {}); }, []);
   const [role, setRole] = useState<string>("guest");
   const [me, setMe] = useState<Me | null>(null);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
@@ -74,6 +76,13 @@ export default function Nav() {
     return true;
   });
 
+  function target(item: NavItem) {
+    if (!oidc) return item.href;
+    if (item.href === "/login") return "/api/auth/oidc/login";
+    if (item.href === "/register") return "https://auth.fede.fpms.ac.be/if/flow/carte-fede-dev-register/";
+    return item.href;
+  }
+
   const userLabel = me
     ? `Connecté : ${me.identifiant ?? me.email ?? "Utilisateur"} (${me.role})`
     : "Non connecté";
@@ -86,14 +95,14 @@ export default function Nav() {
             <li key={item.href} className="inline-flex">
               {item.label === "Site Fédé" ? (
                 <a
-                  href={item.href}
+                  href={target(item)}
                   className="rounded-lg border-2 border-blue-900 bg-blue-900 px-4 py-2 text-white transition duration-150 hover:bg-blue-50 hover:text-blue-900"
                 >
                   {item.label}
                 </a>
               ) : (
                 <a
-                  href={item.href}
+                  href={target(item)}
                   className="relative px-1 py-1 after:absolute after:bottom-0 after:left-0 after:h-[3px] after:w-0 after:rounded-full after:bg-blue-900 after:duration-500 hover:after:w-full"
                 >
                   {item.label}
@@ -151,7 +160,7 @@ export default function Nav() {
               {navItems.map((item: NavItem) => (
                 <li key={item.href}>
                   <a
-                    href={item.href}
+                    href={target(item)}
                     onClick={() => setIsMenuOpen(false)}
                     className={
                       item.label === "Site Fédé"

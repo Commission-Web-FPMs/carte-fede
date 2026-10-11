@@ -147,3 +147,12 @@ class DevIdentityBinding(db.Model):
     managed = db.Column(db.Boolean, nullable=False, default=False)
     state = db.Column(db.String(16), nullable=False, default="pending")
     created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+
+
+class DevEnrollmentConfirmation(db.Model):
+    """Opaque, single-use confirmation; never an authentication credential."""
+    __tablename__ = "dev_enrollment_confirmation"
+    nonce_digest = db.Column(db.String(64), primary_key=True)
+    request_id = db.Column(db.String(36), nullable=False)
+    expires_at = db.Column(db.DateTime, nullable=False)
+    consumed_at = db.Column(db.DateTime)

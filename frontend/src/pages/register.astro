@@ -163,6 +163,8 @@ import Layout from "@layouts/Layout.astro";
     modeVerified=true;
     if ((await response.json()).mode !== 'oidc') { form!.hidden=false;form!.style.display='grid'; return; }
     oidcRegistration=true;
+    window.location.replace('https://auth.fede.fpms.ac.be/if/flow/carte-fede-dev-register/');
+    return;
     document.getElementById('oidcEnrollment')!.hidden=false;
     for (const input of document.querySelectorAll<HTMLInputElement>('#signupForm input[type=password]')) {
       input.disabled=true;input.required=false;input.closest('label')!.hidden=true;input.closest('label')!.style.display='none';
