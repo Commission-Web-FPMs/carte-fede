@@ -3,7 +3,7 @@ from unittest.mock import patch
 from urllib.parse import parse_qs, urlsplit
 import jwt
 from cryptography.hazmat.primitives.asymmetric import rsa
-from app.oidc_dev import verify_claims
+from app.oidc_dev import verify_claims, bound_dev_uuid
 
 class OIDCSecurity(unittest.TestCase):
     @classmethod
@@ -32,6 +32,16 @@ class OIDCSecurity(unittest.TestCase):
         with self.assertRaises(jwt.PyJWTError):verify_claims(encoded,self.key.public_key(),self.issuer,'carte-fede-dev','synthetic-nonce',self.bindings)
     def test_multi_audience_needs_authorized_party(self):
         with self.assertRaises(ValueError):self.validate(dict(self.claims,aud=['carte-fede-dev','other']))
+    def test_existing_account_has_distinct_deterministic_dev_uuid(self):
+        subject='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
+        identity=bound_dev_uuid(subject,self.bindings)
+        self.assertNotEqual(identity,subject)
+        self.assertEqual(identity,bound_dev_uuid(subject,self.bindings))
+        self.assertEqual(self.validate(dict(self.claims,sub=subject,carte_fede_uuid=identity))['sub'],subject)
+        with self.assertRaises(ValueError):self.validate(dict(self.claims,sub=subject,carte_fede_uuid='synthetic-business-uuid'))
+    def test_unknown_noncanonical_subject_refused(self):
+        for value in ['unknown','AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA',None]:
+            with self.assertRaises((ValueError,TypeError,AttributeError)):bound_dev_uuid(value,self.bindings)
     def dev_env(self):
         return dict(APP_ENV='development',AUTH_MODE='oidc',DATABASE_URL='postgresql+psycopg://carte_fede_dev:synthetic@localhost/carte_fede_dev',SECRET_KEY='synthetic-test-key',FRONTEND_BASE_URL='https://carte-dev.fede.fpms.ac.be',OIDC_ISSUER_URL=self.issuer,OIDC_CLIENT_ID='carte-fede-dev',OIDC_CLIENT_SECRET='synthetic-only',OIDC_IDENTITY_BINDINGS='{"synthetic-sub":"synthetic-business-uuid"}',AUTO_CREATE_DB='0')
     def test_production_database_refused_before_sql(self):

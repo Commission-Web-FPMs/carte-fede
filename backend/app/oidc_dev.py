@@ -6,6 +6,7 @@ import json
 import os
 import secrets
 import time
+import uuid
 from datetime import timedelta
 from urllib.parse import urlencode, urlsplit
 
@@ -17,7 +18,38 @@ from flask_login import current_user, login_user, logout_user
 from flask_session import Session
 from sqlalchemy.engine import make_url
 
-from .models import Role, User
+from .models import db, Role, User
+from sqlalchemy.exc import IntegrityError
+
+
+def bound_dev_uuid(subject, mapping):
+    """Stable DEV-only pseudonym; never associate by editable attributes or email."""
+    if subject in mapping:
+        return mapping[subject]
+    identity = uuid.UUID(subject)
+    if str(identity) != subject:
+        raise ValueError("Noncanonical subject")
+    return str(uuid.uuid5(uuid.NAMESPACE_URL, "carte-fede-dev/authentik/" + subject))
+
+
+def get_dev_user(subject, mapping):
+    identity = bound_dev_uuid(subject, mapping)
+    user = db.session.get(User, identity)
+    if user is None and subject not in mapping:
+        user = User(id=identity, nom="DEV", prenom="Membre", member_id=None,
+            email=identity + "@dev.invalid", password_hash="!disabled-local-auth", role=Role.MEMBER)
+        db.session.add(user)
+        try:
+            db.session.commit()
+        except IntegrityError:
+            db.session.rollback()
+            user = db.session.get(User, identity)
+            if user is None:
+                raise
+    # Existing-account DEV profiles never acquire elevated or imported roles.
+    if subject not in mapping and user is not None and user.role != Role.MEMBER:
+        raise ValueError("Existing-account DEV role must be MEMBER")
+    return user
 
 
 def verify_claims(encoded, key, issuer, audience, nonce, mapping):
@@ -29,10 +61,10 @@ def verify_claims(encoded, key, issuer, audience, nonce, mapping):
         raise ValueError("OIDC authorized party mismatch")
     if isinstance(claims["aud"], list) and len(claims["aud"]) > 1 and claims.get("azp") != audience:
         raise ValueError("OIDC authorized party required")
-    if mapping.get(claims["sub"]) != claims.get("carte_fede_uuid"):
+    if bound_dev_uuid(claims["sub"], mapping) != claims.get("carte_fede_uuid"):
         raise ValueError("Authoritative identity binding mismatch")
     if claims.get("carte_fede_dev_allowed") is not True:
-        raise ValueError("DEV group membership or activation missing")
+        raise ValueError("Active DEV identity required")
     return claims
 
 
@@ -94,7 +126,7 @@ def init_dev_oidc(app):
                 timeout=8, allow_redirects=False)
             r.raise_for_status()
             info = r.json()
-            if info.get("sub") != session.get("oidc_sub") or info.get("carte_fede_dev_allowed") is not True or mapping.get(info.get("sub")) != info.get("carte_fede_uuid") or str(current_user.id) != info.get("carte_fede_uuid") or current_user.role == Role.ATTENTE:
+            if info.get("sub") != session.get("oidc_sub") or info.get("carte_fede_dev_allowed") is not True or bound_dev_uuid(info.get("sub"), mapping) != info.get("carte_fede_uuid") or str(current_user.id) != info.get("carte_fede_uuid") or current_user.role == Role.ATTENTE:
                 raise ValueError("Identity no longer authorized")
         except (ValueError, KeyError, requests.RequestException):
             revoke_and_clear()
@@ -138,7 +170,7 @@ def init_dev_oidc(app):
             token = r.json()
             claims = verify_claims(token["id_token"], jwks.get_signing_key_from_jwt(token["id_token"]).key,
                 issuer, client_id, nonce, mapping)
-            user = User.query.filter_by(id=claims["carte_fede_uuid"]).first()
+            user = get_dev_user(claims["sub"], mapping)
             if not user or user.role == Role.ATTENTE:
                 raise ValueError("No authorized local identity")
             session.clear()
