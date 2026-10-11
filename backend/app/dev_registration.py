@@ -193,12 +193,15 @@ def enrollment_hook():
 def enrollment_confirm():
     try:
         payload=URLSafeTimedSerializer(current_app.config['SECRET_KEY'],salt='dev-enrollment-confirmation-v1').loads(request.args.get('state',''),max_age=300)
+        if not isinstance(payload,dict) or not isinstance(payload.get('nonce'),str) or not 32<=len(payload['nonce'])<=128:
+            raise ValueError('Invalid confirmation payload')
         digest=hashlib.sha256(payload['nonce'].encode()).hexdigest()
         row=DevEnrollmentConfirmation.query.filter_by(nonce_digest=digest).with_for_update().first()
         if not row or row.consumed_at or row.expires_at<=datetime.utcnow():raise ValueError('Invalid confirmation')
         row.consumed_at=datetime.utcnow();db.session.commit()
         # Confirmation grants no login, identity binding or business authorization.
         session['enrollment_notice_until']=time.time()+300
+        session['enrollment_notice_request_id']=row.request_id
     except (BadSignature,ValueError,KeyError,TypeError):
         db.session.rollback()
         return jsonify(error='invalid_or_consumed_confirmation'),400
@@ -207,6 +210,9 @@ def enrollment_confirm():
 
 @bp.get('/api/dev/enrollment-notice')
 def enrollment_notice():
-    response=jsonify(pending_confirmation=time.time()<session.get('enrollment_notice_until',0))
+    binding=None
+    if time.time()<session.get('enrollment_notice_until',0):
+        binding=DevIdentityBinding.query.filter_by(issuer=ISSUER,request_id=session.get('enrollment_notice_request_id')).first()
+    response=jsonify(pending_confirmation=binding is not None,state=binding.state if binding else None)
     response.headers['Cache-Control']='no-store'
     return response

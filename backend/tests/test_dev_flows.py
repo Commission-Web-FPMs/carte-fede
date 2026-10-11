@@ -111,6 +111,12 @@ class DevFlows(unittest.TestCase):
   self.assertEqual(c.get('/api/me').status_code,401)
   self.assertEqual(c.get(url.path+'?'+url.query).status_code,400)
   self.assertEqual(c.get('/api/dev/enrollment-confirm?state=forged').status_code,400)
+  binding=db.session.get(DevIdentityBinding,(ISSUER,sub))
+  self.assertEqual(self.client('admin').post('/api/admin/registrations/'+binding.pending_id+'/reject',json={},headers={'Origin':ORIGIN}).status_code,200)
+  self.assertEqual(c.get('/api/dev/enrollment-notice').json['state'],'rejected')
+  self.assertEqual(c.get('/api/me').status_code,401)
+  with c.session_transaction() as session:session['enrollment_notice_until']=time.time()-1
+  self.assertEqual(c.get('/api/dev/enrollment-notice').json,{'pending_confirmation':False,'state':None})
  def test_card_request_payment_refusal_resubmit_and_permissions(self):
   from app.models import PendingCardRequest
   year=current_academic_year();c=self.client('member');h={'Origin':ORIGIN}

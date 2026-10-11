@@ -14,6 +14,7 @@ export default function CardRequest() {
   const [freeRequested, setFreeRequested] = useState(false);
   const [message, setMessage] = useState("");
   const [confirmation, setConfirmation] = useState(false);
+  const [registrationState, setRegistrationState] = useState("");
   async function refresh() {
     const responses = await Promise.all([fetch("/api/memberships", { credentials: "include" }), fetch("/api/memberships/requests", { credentials: "include" })]);
     if (responses.some(r => !r.ok)) { setVisible(false); return; }
@@ -22,7 +23,7 @@ export default function CardRequest() {
   }
   useEffect(() => {
     refresh().catch(() => setVisible(false));
-    fetch('/api/dev/enrollment-notice', { credentials: 'include' }).then(r => r.ok ? r.json() : null).then(d => setConfirmation(d?.pending_confirmation === true)).catch(() => {});
+    fetch('/api/dev/enrollment-notice', { credentials: 'include' }).then(r => r.ok ? r.json() : null).then(d => { setConfirmation(d?.pending_confirmation === true); setRegistrationState(d?.state || ""); }).catch(() => {});
   }, []);
   async function submit() {
     if (busy) return;
@@ -35,7 +36,14 @@ export default function CardRequest() {
     } catch { setMessage("Connexion indisponible. Vérifiez le statut avant de réessayer."); }
     finally { setBusy(false); }
   }
-  if (!visible) return confirmation ? <section role="status" className="mx-auto max-w-5xl rounded-xl bg-blue-50 p-6">Votre inscription a été enregistrée et attend la validation d'un administrateur.</section> : null;
+  const notices: Record<string, string> = {
+    pending: "Votre inscription a été enregistrée et attend la validation d'un administrateur.",
+    activating: "Votre inscription est en cours de validation. Aucun accès métier n’est encore accordé.",
+    rejected: "Votre inscription a été refusée. Contactez un administrateur.",
+    approved: "Votre inscription est validée. Vous pouvez maintenant vous connecter.",
+    historical: "Votre inscription nécessite une activation opérateur séparée.",
+  };
+  if (!visible) return confirmation ? <section role="status" className="mx-auto max-w-5xl rounded-xl bg-blue-50 p-6">{notices[registrationState] || notices.pending}{registrationState === "approved" && <a className="ml-3 underline" href="/api/auth/oidc/login">Se connecter</a>}</section> : null;
   const state = cardRequestState(cards, requests, year);
   const pending = requests.find(r => r.annee === year);
   return <section className="mx-auto max-w-5xl space-y-4 rounded-xl border-l-4 border-blue-900 bg-white p-6 shadow-box">
