@@ -37,6 +37,8 @@ export default function CardRequest({ onYearChange, onRequestsChange, inCards = 
     finally { setBusy(false); }
   }
   const notices: Record<string, string> = {
+    email_pending: "Vérifiez votre e-mail puis définissez votre mot de passe dans Authentik. Aucun accès métier n’est encore accordé.",
+    provisioning: "La création de votre compte est en cours de finalisation. Aucune carte n’est attribuée automatiquement.",
     pending: "Votre inscription a été enregistrée et attend la validation d'un administrateur.",
     activating: "Votre inscription est en cours de validation. Aucun accès métier n’est encore accordé.",
     rejected: "Votre inscription a été refusée. Contactez un administrateur.",

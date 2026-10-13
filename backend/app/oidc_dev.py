@@ -215,8 +215,18 @@ def init_dev_oidc(app):
                     "redirect_uri": callback, "code_verifier": verifier}, timeout=8, allow_redirects=False)
             r.raise_for_status()
             token = r.json()
+            from .dev_registration import automatic_accounts
+            auto_accounts=automatic_accounts()
             claims = verify_claims(token["id_token"], jwks.get_signing_key_from_jwt(token["id_token"]).key,
-                issuer, client_id, nonce, mapping, registration=registration)
+                issuer, client_id, nonce, mapping, registration=registration or auto_accounts)
+            if auto_accounts and not mapping.get(claims['sub']):
+                # No privilege or identity adoption: native authenticated profile
+                # intake followed by a fresh OIDC callback is still required.
+                session.clear();app.session_interface.regenerate(session)
+                return redirect(root+'/if/flow/carte-fede-dev-existing-registration/')
+            if auto_accounts and not registration:
+                verify_claims(token['id_token'],jwks.get_signing_key_from_jwt(token['id_token']).key,
+                    issuer,client_id,nonce,mapping)
             if registration:
                 session.clear()
                 app.session_interface.regenerate(session)

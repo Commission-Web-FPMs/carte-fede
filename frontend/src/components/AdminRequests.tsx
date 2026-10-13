@@ -24,7 +24,7 @@ type CardRequest = {
   status: "payment_required" | "pending";
   free_card: boolean;
 };
-type Queue = { registrations: Registration[]; cards: CardRequest[] };
+type Queue = { registrations: Registration[]; cards: CardRequest[]; automatic_accounts?: boolean };
 
 export default function AdminRequests({
   onChanged,
@@ -140,11 +140,11 @@ export default function AdminRequests({
                       "fr-BE",
                     )}
                   </p>
-                  <p className="mt-2 text-sm font-medium text-blue-900">
+                  {queue.automatic_accounts ? <p className="mt-2 text-sm text-blue-900">Le compte exige une vérification native de l’e-mail et du mot de passe. Aucune approbation ADMIN ; aucune carte attribuée.</p> : <p className="mt-2 text-sm font-medium text-blue-900">
                     {item.free_card_requested ? "Carte gratuite BAC1 Polytech demandée : à examiner après validation du compte." : "Carte : paiement requis après validation du compte."}
-                  </p>
+                  </p>}
                   {(item.identity_state==='historical' || item.identity_state==='historical-unverified') && <p className="mt-2 text-sm text-amber-800">Identité historique partagée : activation opérateur séparée, aucune approbation automatique DEV.</p>}
-                  <div className="mt-3 flex flex-wrap gap-2">
+                  {!queue.automatic_accounts && <div className="mt-3 flex flex-wrap gap-2">
                       <button
                         type="button"
                         className="admin-button admin-primary"
@@ -161,8 +161,8 @@ export default function AdminRequests({
                       >
                         Refuser
                       </button>
-                  </div>
-                  {confirmReject === `registration:${item.id}` && (
+                  </div>}
+                  {!queue.automatic_accounts && confirmReject === `registration:${item.id}` && (
                     <div className="mt-3 rounded-xl border border-red-200 p-3 text-sm">
                       <p>
                         Refuser l’inscription de {item.prenom} {item.nom} ?

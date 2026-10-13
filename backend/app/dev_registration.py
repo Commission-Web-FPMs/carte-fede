@@ -9,6 +9,7 @@ import requests
 from flask import Blueprint, current_app, jsonify, request, session, redirect
 from itsdangerous import URLSafeTimedSerializer, BadSignature
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy import text
 from .models import db, DevIdentityBinding, DevEnrollmentConfirmation, PendingRegistration, User, Role, Membership, PendingCardRequest
 
 ISSUER = "https://auth.fede.fpms.ac.be/application/o/carte-fede-dev/"
@@ -32,6 +33,103 @@ def identity_binding(subject):
 def bound_identity(subject):
     b = identity_binding(subject)
     return b.user_id if b and b.state == "approved" else None
+
+def automatic_accounts():
+    return (os.getenv('APP_ENV') == 'development' and
+            os.getenv('DEV_EMAIL_REGISTRATION_ENABLED') == '1')
+
+def automatic_enrollment(data):
+    """Signed native events only. Account creation never creates a card/request."""
+    from .dev_email_registration import normalize_intake, require_native_proof, EnrollmentContractError
+    if not automatic_accounts():
+        raise RegistrationError('Parcours automatique désactivé.', 409)
+    try:
+        intake = normalize_intake(data['business'])
+        subject = str(uuid.UUID(data['subject']))
+        operation = data['operation']
+        if operation not in ('email-created', 'email-verified', 'existing-verified'):
+            raise RegistrationError('Opération invalide.', 400)
+        # Serialize per subject and per canonical contact. Locks end at commit;
+        # the durable provisioning state is the cross-system recovery barrier.
+        for value in sorted(('subject:'+subject, 'contact:'+intake.email)):
+            db.session.execute(text('SELECT pg_advisory_xact_lock(:key)'),
+                {'key': int.from_bytes(hashlib.sha256(value.encode()).digest()[:8], 'big', signed=True)})
+        b = DevIdentityBinding.query.filter_by(issuer=ISSUER,subject=subject).with_for_update().first()
+        managed = operation != 'existing-verified'
+        native = None
+        if managed:
+            native = api_user(data['auth_user_pk'])
+            probe = b or DevIdentityBinding(subject=subject,user_id=None)
+            verify_owned(probe, native)
+            if operation == 'email-verified':
+                require_native_proof(native,subject,intake.email,data.get('proof_id'))
+            elif native.get('is_active') or native.get('email','').lower()!=intake.email:
+                raise RegistrationError('Identité provisoire invalide.')
+        elif data.get('active_attestation') is not True:
+            raise RegistrationError('Identité active non attestée.',401)
+        if not managed:
+            historical=json.loads(os.getenv('OIDC_IDENTITY_BINDINGS','{}')).get(subject)
+            if historical:
+                user=db.session.get(User,historical)
+                if not user or user.role==Role.ATTENTE:raise RegistrationError('Profil historique non autorisé.')
+                db.session.commit()
+                return {'ok':True,'state':'approved','user_id':user.id}
+        if b and b.state == 'approved':
+            db.session.commit()
+            return {'ok':True,'state':'approved','user_id':b.user_id}
+        if b and b.state not in ('email_pending','provisioning'):
+            raise RegistrationError('Ancien dossier : parcours vérifié séparé requis.')
+        if b and b.managed != managed:
+            raise RegistrationError('Périmètre identité incompatible.')
+        if not b:
+            values = dict(intake.pending_identifier(),nom=intake.nom,prenom=intake.prenom)
+            check_available(values)
+            row = PendingRegistration(id=str(uuid.uuid4()), **values,
+                password_hash='!oidc-only',expires_at=datetime.utcnow()+timedelta(days=30),
+                free_card_requested=False,card_year=None)
+            db.session.add(row);db.session.flush()
+            b = DevIdentityBinding(issuer=ISSUER,subject=subject,pending_id=row.id,
+                request_id=row.id,managed=managed,auth_user_pk=data['auth_user_pk'] if managed else None,
+                state='email_pending')
+            db.session.add(b);db.session.flush()
+        row = db.session.get(PendingRegistration,b.pending_id)
+        if not row or (row.nom,row.prenom,row.member_id,row.email) != (
+                intake.nom,intake.prenom,intake.member_id,None if intake.member_id else intake.email):
+            raise RegistrationError('Informations réservées différentes ; aucune modification.')
+        if operation == 'email-created':
+            db.session.commit()
+            return {'ok':True,'state':b.state}
+        if b.state == 'email_pending':
+            # Recheck uniqueness at the final reservation, without matching users.
+            if (intake.member_id and User.query.filter_by(member_id=intake.member_id).first()) or User.query.filter(db.func.lower(User.email)==intake.email).first():
+                raise RegistrationError('Identifiant métier indisponible.')
+            user = User(id=str(uuid.uuid4()),nom=intake.nom,prenom=intake.prenom,
+                member_id=intake.member_id,email=None if intake.member_id else intake.email,
+                password_hash='!oidc-only',role=Role.ATTENTE)
+            db.session.add(user);db.session.flush();b.user_id=user.id;b.state='provisioning'
+            db.session.commit()
+        if managed:
+            native=api_user(b.auth_user_pk);verify_owned(b,native)
+            require_native_proof(native,subject,intake.email,data.get('proof_id'))
+            attrs=dict(native['attributes']);attrs['carte_fede_dev_business_uuid']=b.user_id
+            groups=sorted(set(native.get('groups',[]))|{os.environ['DEV_MEMBERS_GROUP']})
+            native=api_user(b.auth_user_pk,dict(attributes=attrs,groups=groups,is_active=True))
+            verify_owned(b,native)
+            if not native.get('is_active') or os.environ['DEV_MEMBERS_GROUP'] not in native.get('groups',[]) or native['attributes'].get('carte_fede_dev_business_uuid')!=b.user_id:
+                raise RegistrationError('Activation non confirmée ; reprise requise.',503)
+        db.session.expire_all()
+        b=DevIdentityBinding.query.filter_by(issuer=ISSUER,subject=subject).populate_existing().with_for_update().one()
+        if b.state=='approved':
+            db.session.commit();return {'ok':True,'state':'approved','user_id':b.user_id}
+        if b.state!='provisioning':raise RegistrationError('État modifié ; intervention requise.')
+        user=db.session.get(User,b.user_id);user.role=Role.MEMBER
+        row=db.session.get(PendingRegistration,b.pending_id)
+        b.state='approved'
+        if row:db.session.delete(row)
+        db.session.commit()
+        return {'ok':True,'state':'approved','user_id':user.id}
+    except EnrollmentContractError:
+        raise RegistrationError('Preuve native ou informations incomplètes.',400)
 
 def business_data(data):
     if not isinstance(data, dict) or any(k in data for k in ["password", "password2", "role", "groups", "user_id", "subject"]):
@@ -145,6 +243,7 @@ def registration_guard():
 @bp.route('/api/dev/registration',methods=['GET','POST'])
 def registration():
     try:
+        if automatic_accounts():raise RegistrationError('Utilisez le parcours natif de vérification.',409)
         sub=session['registration_subject']
         if request.method=='GET':
             b=identity_binding(sub);return jsonify(state=b.state if b else 'unregistered',authenticated=True)
@@ -160,7 +259,24 @@ def enrollment_hook():
         stamp=request.headers.get('X-Enrollment-Time','');signature=request.headers.get('X-Enrollment-Signature','')
         key=os.environ['DEV_ENROLLMENT_HOOK_KEY'];expected=hmac.new(key.encode(),stamp.encode()+b'.'+raw,hashlib.sha256).hexdigest()
         if not stamp.isdigit() or abs(time.time()-int(stamp))>60 or not hmac.compare_digest(signature,expected):raise RegistrationError('Attestation invalide.',401)
-        data=json.loads(raw);values=business_data(data.get('business'))
+        data=json.loads(raw)
+        if data.get('operation')=='email-check' and automatic_accounts():
+            from .dev_email_registration import normalize_intake, EnrollmentContractError
+            try:intake=normalize_intake(data.get('business'))
+            except EnrollmentContractError:raise RegistrationError('Informations invalides.',400)
+            existing=identity_binding(data.get('subject','')) if data.get('subject') else None
+            if existing and existing.state in ('email_pending','provisioning') and existing.managed:
+                row=db.session.get(PendingRegistration,existing.pending_id)
+                if row and (row.nom,row.prenom,row.member_id,row.email)==(intake.nom,intake.prenom,intake.member_id,None if intake.member_id else intake.email):
+                    return jsonify(ok=True)
+            check_available(dict(intake.pending_identifier(),nom=intake.nom,prenom=intake.prenom))
+            for model in (User,PendingRegistration):
+                if model.query.filter(db.func.lower(model.email)==intake.email).first():raise RegistrationError('Identifiant indisponible.')
+            return jsonify(ok=True)
+        if data.get('operation') in ('email-created','email-verified','existing-verified'):
+            return jsonify(automatic_enrollment(data)),202
+        if automatic_accounts():raise RegistrationError('Ancien parcours d’approbation désactivé.',409)
+        values=business_data(data.get('business'))
         if data.get('operation')=='check':
             with _enrollment_lock:
                 now=time.time()

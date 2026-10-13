@@ -41,6 +41,7 @@ jobs:
           python -m unittest discover -s tests -p 'test_log_privacy.py' -v
           python -m unittest discover -s tests -p 'test_oidc_dev.py' -v
           python -m unittest discover -s tests -p 'test_dev_sessions.py' -v
+          python -m unittest discover -s tests -p 'test_dev_email_registration.py' -v
       - name: Backend request flow on disposable PostgreSQL 18 ICU
         working-directory: backend
         env:
@@ -50,6 +51,7 @@ jobs:
         run: |
           python -m unittest discover -s tests -p 'test_requests.py' -v
           python -m unittest discover -s tests -p 'test_dev_flows.py' -v
+          python -m unittest discover -s tests -p 'test_dev_automatic_accounts.py' -v
       - uses: actions/setup-node@v4
         with:
           node-version: '22'

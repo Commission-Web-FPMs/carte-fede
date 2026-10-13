@@ -82,7 +82,9 @@ def pending_requests():
         PendingRegistration.expires_at > now
     ).order_by(PendingRegistration.created_at.asc()).all()
     cards = PendingCardRequest.query.filter(PendingCardRequest.status.in_(("pending", "payment_required"))).order_by(PendingCardRequest.created_at.asc()).all()
+    from .dev_registration import automatic_accounts
     return jsonify({
+        "automatic_accounts": automatic_accounts(),
         "registrations": [{"id": row.id, "nom": row.nom, "prenom": row.prenom,
                            "member_id": row.member_id, "email": row.email, "created_at": row.created_at.isoformat(),
                            "expires_at": row.expires_at.isoformat(), "free_card_requested": row.free_card_requested, "identity_state": _identity_state(row.id)} for row in registrations],
@@ -95,6 +97,9 @@ def pending_requests():
 
 @bp_admin.post("/api/admin/registrations/<request_id>/<decision>")
 def decide_registration(request_id, decision):
+    from .dev_registration import automatic_accounts
+    if automatic_accounts():
+        return jsonify(error='La création de compte exige une vérification native, sans approbation ADMIN.'),409
     if decision not in ("approve", "reject"):
         return jsonify({"error": "Décision invalide."}), 404
     row = PendingRegistration.query.filter_by(id=request_id).first()

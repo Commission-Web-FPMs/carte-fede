@@ -1,5 +1,10 @@
 # Self-registration
 
+Pour le nouveau parcours OIDC DEV, consulter
+[Comptes DEV automatiques](dev-automatic-accounts.md). Les étapes ci-dessous
+décrivent le parcours Flask historique ; elles ne doivent pas être appliquées
+au nouveau flow DEV ni exécutées comme migrations de production pendant cette étape.
+
 ## Objectif
 
 Permettre aux nouveaux utilisateurs de créer eux-mêmes leur compte sur le site de la carte Fédé, sans nécessiter la création manuelle du compte par un administrateur.
